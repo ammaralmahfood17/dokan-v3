@@ -25,21 +25,23 @@ test.afterAll(async () => {
 test('unauthenticated requests are rejected across auxiliary endpoints', async () => {
   const BASE = `${E2E_BASE_URL}`;
 
-  // Telegram webhook — fail closed: on prod the secret IS configured, so
-  // a request without the correct header → 401 (never processed).
+  // Telegram webhook — fail closed. Rejection is 401 when the shared secret
+  // is configured, or 503 when TELEGRAM_WEBHOOK_SECRET is unset (v3's current
+  // state — the bot feature isn't wired yet). Either way the request is NOT
+  // processed, which is what this guard asserts.
   const noSecret = await fetch(`${BASE}/api/telegram/webhook`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ update_id: 1 }),
   });
-  expect(noSecret.status).toBe(401);
+  expect([401, 503], 'telegram webhook must reject unauthenticated').toContain(noSecret.status);
 
   const badSecret = await fetch(`${BASE}/api/telegram/webhook`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-telegram-bot-api-secret-token': 'wrong-secret' },
     body: JSON.stringify({ update_id: 1 }),
   });
-  expect(badSecret.status).toBe(401);
+  expect([401, 503], 'telegram webhook must reject a wrong secret').toContain(badSecret.status);
 
   // Push subscribe — needs a session.
   const pushRes = await fetch(`${BASE}/api/push/subscribe`, {
