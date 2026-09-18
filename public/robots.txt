@@ -1,0 +1,8 @@
+# FIX-M-005: منع فهرسة لوحات التحكم — الحماية الفعلية عبر requireSuperAdmin
+User-agent: *
+Allow: /
+Disallow: /dashboard
+Disallow: /kitchen
+Disallow: /admin
+Disallow: /super-admin
+Disallow: /api/

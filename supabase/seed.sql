@@ -1,0 +1,7 @@
+-- Optional seed data for local development.
+-- Apply after migrations. Does not create auth users.
+--
+-- Example (run after you have a real auth user + project via onboarding):
+-- insert into public.categories (project_id, name, sort_order) values
+--   ('<project-uuid>', 'مشروبات', 0),
+--   ('<project-uuid>', 'مأكولات', 1);

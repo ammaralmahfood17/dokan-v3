@@ -1,0 +1,721 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ShoppingBag, X, Check, Bell, FileText, Search, Languages } from 'lucide-react';
+import { formatMoney, money, currencyDecimals } from '@/lib/utils';
+import type {
+  CartLine,
+  Category,
+  OrderItemAddon,
+  Product,
+  ProductAddon,
+  Project,
+  Table,
+} from '@/lib/types';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
+// D2: extracted sections — bottom sheet + product row now live in
+// src/components/menu/ (menu-client stays the orchestrator).
+import { Sheet } from '@/components/menu/sheet';
+// FIX-C-003: الأسطح المستخرجة — cart + success state
+// FIX-P-001: تحميل كسول للـ CartSheet (خارج الـ bundle الرئيسي — menu-client
+// يبقى خفيفًا للعميل على اتصال ضعيف)
+import dynamic from 'next/dynamic';
+const CartSheet = dynamic(() => import('@/components/menu/cart-sheet').then((m) => m.CartSheet), {
+  ssr: false,
+});
+import { OrderSuccessState } from '@/components/menu/order-success-state';
+import { MenuProductRow } from '@/components/menu/product-card';
+// D7: offline indicator on the customer-facing menu (banner, not blocker).
+import { OfflineBanner } from '@/components/ui/offline-banner';
+
+/** Generic blur placeholder for product images — tiny 16×16 grey base64 */
+const BLUR_PLACEHOLDER =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAMklEQVQ4T2NkYPj/n4EBBJgYKAQMFFiAKcBAUwsDUx0DxS5gYKA8DCh2AQNlYUBZCgDxpwgRg9RXOAAAAABJRU5ErkJggg==';
+
+type ProductWithAddons = Product & { product_addons: ProductAddon[] };
+
+export function MenuClient({
+  project,
+  table,
+  categories,
+  products,
+}: {
+  project: Project;
+  table: Table;
+  categories: Category[];
+  products: ProductWithAddons[];
+}) {
+  const [cart, setCart] = useState<CartLine[]>([]);
+  const [cartOpen, setCartOpen] = useState(false);
+  const [picker, setPicker] = useState<ProductWithAddons | null>(null);
+  const [selectedAddons, setSelectedAddons] = useState<string[]>([]);
+  const [itemNotes, setItemNotes] = useState('');
+  const [orderNotes, setOrderNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  // D10: persistent order error with a retry button (toast alone vanishes
+  // and the customer is left guessing what happened).
+  const [orderError, setOrderError] = useState<string | null>(null);
+  const [orderDone, setOrderDone] = useState<{
+    id: string;
+    totalAmount: number;
+    orderNumber: number;
+  } | null>(null);
+  const [activeCategory, setActiveCategory] = useState<string | 'all'>('all');
+  const [busyAction, setBusyAction] = useState<'waiter' | 'bill' | null>(null);
+  const [lastAddedKey, setLastAddedKey] = useState<string | null>(null);
+  const lastAddedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // بحث في المنتجات (فقط للمنيو الكبير — 12+ منتج)
+  const [menuQuery, setMenuQuery] = useState('');
+  // تبديل لغة العرض: عربي / English (يستخدم name_en عندما متاح)
+  // FIX-I-003: حفظ تفضيل اللغة في localStorage (لا يضيع عند refresh)
+  const [lang, setLang] = useState<'ar' | 'en'>(() => {
+    if (typeof window === 'undefined') return 'ar';
+    return localStorage.getItem('dokan-lang') === 'en' ? 'en' : 'ar';
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('dokan-lang', lang);
+    } catch {
+      // privacy mode — تجاهل بصمت
+    }
+  }, [lang]);
+
+  const displayName = useCallback(
+    (p: ProductWithAddons) =>
+      lang === 'en' && p.name_en ? p.name_en : p.name,
+    [lang]
+  );
+
+  // Cleanup lastAddedTimer on unmount
+  useEffect(() => {
+    return () => {
+      if (lastAddedTimer.current) clearTimeout(lastAddedTimer.current);
+    };
+  }, []);
+
+  // Ref for smooth-scrolling to products section
+  const productsRef = useRef<HTMLDivElement>(null);
+
+  const currency = project.currency;
+
+  const filtered = useMemo(() => {
+    let list = products;
+    if (activeCategory !== 'all') {
+      list = list.filter((p) => p.category_id === activeCategory);
+    }
+    const q = menuQuery.trim().toLowerCase();
+    if (q) {
+      list = list.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          (p.name_en ?? '').toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [products, activeCategory, menuQuery]);
+
+  // البحث يظهر فقط للمنيو الكبير (12+ منتج) — لا يزحم المنيو الصغير
+  const showMenuSearch = products.length >= 12;
+
+  const total = useMemo(
+    () => money(cart.reduce((s, l) => s + l.unitPrice * l.quantity, 0), currencyDecimals(currency)),
+    [cart, currency]
+  );
+  const itemCount = useMemo(
+    () => cart.reduce((s, l) => s + l.quantity, 0),
+    [cart]
+  );
+
+  /** Scroll products into view when category changes (mobile smooth UX) */
+  const handleCategoryChange = useCallback((catId: string | 'all') => {
+    setActiveCategory(catId);
+    // Small delay so React renders filtered items first
+    setTimeout(() => {
+      productsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  }, []);
+
+  function openProduct(p: ProductWithAddons) {
+    setPicker(p);
+    setSelectedAddons([]);
+    setItemNotes('');
+  }
+
+  function confirmAdd() {
+    if (!picker) return;
+    const addons: OrderItemAddon[] = (picker.product_addons || [])
+      .filter((a) => selectedAddons.includes(a.id) && a.is_available)
+      .map((a) => ({
+        id: a.id,
+        name: a.name,
+        price: money(Number(a.price), currencyDecimals(currency)),
+      }));
+    const addonTotal = money(addons.reduce((s, a) => s + a.price, 0), currencyDecimals(currency));
+    const unitPrice = money(Number(picker.price) + addonTotal, currencyDecimals(currency));
+    const key = `${picker.id}:${addons
+      .map((a) => a.id)
+      .sort()
+      .join(',')}:${itemNotes.trim()}`;
+
+    const alreadyInCart = cart.some((l) => l.key === key);
+    const wasEmpty = cart.length === 0;
+
+    setCart((prev) => {
+      const existing = prev.find((l) => l.key === key);
+      if (existing) {
+        return prev.map((l) =>
+          l.key === key ? { ...l, quantity: l.quantity + 1 } : l
+        );
+      }
+      return [
+        ...prev,
+        {
+          key,
+          productId: picker.id,
+          productName: picker.name,
+          unitPrice,
+          quantity: 1,
+          addons,
+          notes: itemNotes.trim(),
+        },
+      ];
+    });
+    setPicker(null);
+
+    // Auto-open the cart on the FIRST item so the customer can review + send.
+    // Later adds only toast (don't interrupt multi-item ordering).
+    if (wasEmpty) setCartOpen(true);
+
+    // Visual feedback: flash badge on the product card + toast
+    setLastAddedKey(picker.id);
+    if (lastAddedTimer.current) clearTimeout(lastAddedTimer.current);
+    lastAddedTimer.current = setTimeout(() => setLastAddedKey(null), 800);
+    toast.success(alreadyInCart ? 'زادت الكمية' : 'أُضيف إلى السلة', { duration: 1200 });
+  }
+
+  // Quick-Add: add directly without addon picker
+  function quickAdd(p: ProductWithAddons) {
+    if ((p.product_addons || []).filter((a) => a.is_available).length > 0) {
+      openProduct(p);
+      return;
+    }
+    const key = `${p.id}::`;
+    const alreadyInCart = cart.some((l) => l.key === key);
+    const wasEmpty = cart.length === 0;
+    setCart((prev) => {
+      const existing = prev.find((l) => l.key === key);
+      if (existing) {
+        return prev.map((l) =>
+          l.key === key ? { ...l, quantity: l.quantity + 1 } : l
+        );
+      }
+      return [
+        ...prev,
+        {
+          key,
+          productId: p.id,
+          productName: p.name,
+          unitPrice: money(Number(p.price), currencyDecimals(currency)),
+          quantity: 1,
+          addons: [],
+          notes: '',
+        },
+      ];
+    });
+    // Auto-open the cart on the FIRST item (same UX as confirmAdd)
+    if (wasEmpty) setCartOpen(true);
+    // Visual feedback
+    setLastAddedKey(p.id);
+    if (lastAddedTimer.current) clearTimeout(lastAddedTimer.current);
+    lastAddedTimer.current = setTimeout(() => setLastAddedKey(null), 800);
+    toast.success(alreadyInCart ? 'زادت الكمية' : 'أُضيف إلى السلة', { duration: 1200 });
+  }
+
+  function updateQty(key: string, delta: number) {
+    setCart((prev) =>
+      prev
+        .map((l) =>
+          l.key === key ? { ...l, quantity: l.quantity + delta } : l
+        )
+        .filter((l) => l.quantity > 0)
+    );
+  }
+
+  async function placeOrder() {
+    if (!cart.length) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/public/order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectSlug: project.slug,
+          tableSlug: table.slug,
+          notes: orderNotes.trim() || undefined,
+          items: cart.map((l) => ({
+            productId: l.productId,
+            quantity: l.quantity,
+            addonIds: l.addons.map((a) => a.id),
+            notes: l.notes || undefined,
+          })),
+        }),
+      });
+      const data = (await res.json()) as {
+        error?: string;
+        order?: { id: string; status: string; totalAmount: number; orderNumber: number };
+      };
+      if (!res.ok || !data.order) {
+        // D10: keep the error visible next to the confirm button so the
+        // customer can retry — a toast disappears and leaves them stuck.
+        setOrderError(data.error || 'فشل إرسال الطلب');
+        return;
+      }
+      setOrderError(null);
+      setOrderDone({
+        id: data.order.id,
+        totalAmount: data.order.totalAmount,
+        orderNumber: data.order.orderNumber,
+      });
+      setCart([]);
+      setCartOpen(false);
+      setOrderNotes('');
+      setItemNotes('');
+    } catch {
+      // FIX-W-002: حفظ الطلب في IndexedDB + تسجيل Background Sync —
+      // عند عودة الاتصال يُرسل تلقائيًا (Chromium). Safari/Firefox:
+      // زر إعادة المحاولة (D10) يغطيهم.
+      setOrderError('تعذّر الاتصال — سيُرسل الطلب تلقائيًا عند عودة الإنترنت');
+      try {
+        const payload = {
+          projectSlug: project.slug,
+          tableSlug: table.slug,
+          notes: orderNotes.trim() || undefined,
+          items: cart.map((l) => ({
+            productId: l.productId,
+            quantity: l.quantity,
+            addonIds: l.addons.map((a) => a.id),
+            notes: l.notes || undefined,
+          })),
+        };
+        const dbReq = indexedDB.open('dokan-pending-orders', 1);
+        dbReq.onupgradeneeded = () => {
+          dbReq.result.createObjectStore('orders', { keyPath: 'id' });
+        };
+        dbReq.onsuccess = () => {
+          const db = dbReq.result;
+          const tx = db.transaction('orders', 'readwrite');
+          tx.objectStore('orders').put({
+            id: crypto.randomUUID(),
+            payload,
+          });
+          // Register background sync (best-effort — Safari/Firefox throw)
+          // FIX-W-002: sync غير معرّف في TS types — وصول آمن عبر optional
+          navigator.serviceWorker?.ready
+            .then((reg) =>
+              (reg as unknown as { sync?: { register: (t: string) => Promise<void> } })
+                .sync?.register('submit-pending-order')
+            )
+            .catch(() => {});
+        };
+      } catch {
+        // IndexedDB غير متاح — زر إعادة المحاولة يبقى الخيار
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function callService(kind: 'waiter' | 'bill') {
+    setBusyAction(kind);
+    try {
+      const res = await fetch(`/api/public/${kind}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectSlug: project.slug,
+          tableSlug: table.slug,
+        }),
+      });
+      if (!res.ok) {
+        toast.error('تعذّر إرسال الطلب');
+        return;
+      }
+      toast.success(kind === 'waiter' ? 'تم استدعاء الموظف' : 'تم طلب الفاتورة');
+    } catch {
+      toast.error('تعذّر الاتصال');
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  // ======== ORDER DONE SCREEN (FIX-C-003: extracted component) ========
+  if (orderDone) {
+    return (
+      <OrderSuccessState
+        orderNumber={orderDone.orderNumber}
+        orderId={orderDone.id}
+        projectSlug={project.slug}
+        totalAmount={orderDone.totalAmount}
+        currency={currency}
+        busyAction={busyAction}
+        onCallService={callService}
+        onOrderMore={() => setOrderDone(null)}
+      />
+    );
+  }
+
+  // ======== CART BAR BADGE ========
+  const cartBadge = itemCount > 0;
+
+  /** Total qty of this product across all cart lines (addon keys merged). */
+  function qtyOf(productId: string) {
+    return cart.filter((l) => l.productId === productId).reduce((s, l) => s + l.quantity, 0);
+  }
+
+  /** Decrement the most recently added cart line for this product. */
+  function decrementProduct(productId: string) {
+    const line = [...cart].reverse().find((l) => l.productId === productId);
+    if (line) updateQty(line.key, -1);
+  }
+
+  /** Render a single product card — mockup: bordered grid card + stepper. */
+  function renderProduct(p: ProductWithAddons, isFirst = false) {
+    return (
+      <MenuProductRow
+        key={p.id}
+        product={p}
+        currency={currency}
+        isFirst={isFirst}
+        lastAdded={lastAddedKey === p.id}
+        quantity={qtyOf(p.id)}
+        displayName={displayName(p)}
+        onQuickAdd={quickAdd}
+        onDecrement={() => decrementProduct(p.id)}
+      />
+    );
+  }
+
+  // ======== MAIN MENU ========
+  return (
+    <div className="min-h-dvh bg-[var(--color-bg)] pb-24 page-enter">
+      {/* D7: offline notice — replaces the full-screen blocker (design: the
+          customer should still be able to browse the cached menu) */}
+      <OfflineBanner />
+      {/* HEADER — brand mark + TABLE chip */}
+      <header
+        className="sticky top-0 z-[var(--z-sticky)] border-b border-[var(--color-border)] px-4 py-3.5 backdrop-blur-md"
+        style={{ background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)' }}
+      >
+        <div className="mx-auto flex max-w-[480px] items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[var(--color-text)] font-display text-[18px] font-bold text-[var(--color-bg)]"
+            >
+              {project.name.slice(0, 1)}
+            </div>
+            <div className="min-w-0">
+              <h1 className="truncate font-display text-[17px] font-bold">{project.name}</h1>
+              <p className="text-[11px] text-[var(--color-text-secondary)]">
+                امسح واطلب من طاولتك
+              </p>
+            </div>
+          </div>
+          {/* Table chip */}
+          <div className="flex items-center gap-1.5">
+            <div className="rounded-full border border-[var(--color-border-strong)] px-3 py-1 font-mono text-[12px] font-semibold tabular-nums text-[var(--color-text-secondary)]">
+              TABLE·{String(table.number).padStart(2, '0')}
+            </div>
+            <button
+              type="button"
+              disabled={busyAction !== null}
+              onClick={() => callService('waiter')}
+              className="min-h-[44px] rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-xs font-bold transition-colors hover:bg-[var(--color-bg)] disabled:opacity-50"
+            >
+              موظف
+            </button>
+            <button
+              type="button"
+              disabled={busyAction !== null}
+              onClick={() => callService('bill')}
+              className="min-h-[44px] rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-xs font-bold transition-colors hover:bg-[var(--color-bg)] disabled:opacity-50"
+            >
+              فاتورة
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* CATEGORIES — pills, active = primary (mockup) */}
+      {categories.length > 0 && (
+        <div className="sticky top-[57px] z-[var(--z-sticky)] border-b border-[var(--color-border)] bg-[var(--color-bg)]">
+          {/* FIX-R-003: fade على الحواف يشير لوجود محتوى إضافي (scrollbar مخفي) */}
+          <div
+            className="mx-auto flex max-w-[480px] gap-2 overflow-x-auto px-3 pb-1 pt-1"
+            style={{
+              scrollbarWidth: 'none',
+              maskImage: 'linear-gradient(to left, transparent, black 24px)',
+              WebkitMaskImage: 'linear-gradient(to left, transparent, black 24px)',
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => handleCategoryChange('all')}
+              className={`min-h-[44px] shrink-0 whitespace-nowrap rounded-full px-4 text-[13px] font-semibold transition-colors ${
+                activeCategory === 'all'
+                  ? 'bg-[var(--color-primary)] text-white'
+                  : 'border border-[var(--color-border-strong)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:border-[var(--color-text-tertiary)] hover:text-[var(--color-text)]'
+              }`}
+            >
+              الكل
+            </button>
+            {categories.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => handleCategoryChange(c.id)}
+                className={`min-h-[44px] shrink-0 whitespace-nowrap rounded-full px-4 text-[13px] font-semibold transition-colors ${
+                  activeCategory === c.id
+                    ? 'bg-[var(--color-primary)] text-white'
+                    : 'border border-[var(--color-border-strong)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:border-[var(--color-text-tertiary)] hover:text-[var(--color-text)]'
+                }`}
+              >
+                {c.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* PRODUCTS — grouped by category */}
+      <main ref={productsRef} className="mx-auto max-w-lg px-3 py-4">
+        {/* Search + language toggle — search only for big menus */}
+        <div className="mb-4 flex items-center gap-2">
+          {showMenuSearch && (
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]" />
+              <input
+                type="search"
+                inputMode="search"
+                value={menuQuery}
+                onChange={(e) => setMenuQuery(e.target.value)}
+                placeholder="ابحث عن منتج…"
+                aria-label="ابحث في القائمة"
+                maxLength={60}
+                className="input min-h-[44px] w-full ps-10 pe-10"
+                style={{ borderRadius: 'var(--radius-md)' }}
+              />
+              {menuQuery && (
+                <button
+                  type="button"
+                  onClick={() => setMenuQuery('')}
+                  aria-label="مسح البحث"
+                  className="absolute end-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-[var(--color-text-muted)] hover:bg-[var(--color-surface-sunken)]"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          )}
+          {products.some((p) => p.name_en) && (
+            <button
+              type="button"
+              onClick={() => setLang((l) => (l === 'ar' ? 'en' : 'ar'))}
+              aria-label={lang === 'ar' ? 'التبديل إلى الإنجليزية' : 'Switch to Arabic'}
+              aria-pressed={lang === 'en'}
+              className="flex h-[44px] shrink-0 items-center gap-1.5 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-xs font-bold text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-primary)]"
+            >
+              <Languages className="h-4 w-4" />
+              {lang === 'ar' ? 'EN' : 'عربي'}
+            </button>
+          )}
+        </div>
+        {!filtered.length ? (
+          menuQuery.trim() ? (
+            /* v1.1 Calm Surface mockup — signature empty search state */
+            <div className="flex flex-col items-center gap-2.5 px-8 py-14 text-center">
+              <div className="mb-1 flex h-[52px] w-[52px] items-center justify-center rounded-full bg-[var(--color-primary-tint)] text-[var(--color-primary)]">
+                <Search className="h-[22px] w-[22px]" />
+              </div>
+              <p className="text-[15px] font-bold">ما حصلنا شي يطابق بحثك</p>
+              <p className="max-w-[240px] text-[13px] text-[var(--color-text-secondary)]">
+                جرّب كلمة ثانية، أو تصفّح الأقسام من الأعلى
+              </p>
+              <button
+                type="button"
+                onClick={() => setMenuQuery('')}
+                className="mt-1.5 rounded-[var(--radius-md)] px-3 py-2 text-[13px] font-bold text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary-tint)]"
+              >
+                مسح البحث
+              </button>
+            </div>
+          ) : (
+            <div className="card empty">
+              <h3>القائمة فارغة</h3>
+              <p className="text-sm">لا توجد منتجات متاحة حالياً.</p>
+            </div>
+          )
+        ) : (
+          <>
+            {activeCategory === 'all' ? (
+              /* All categories: group products under each category */
+              <>
+                {categories.filter((c) => products.some((p) => p.category_id === c.id)).map((cat, catIdx) => {
+                  const catProducts = filtered.filter((p) => p.category_id === cat.id);
+                  if (!catProducts.length) return null;
+                  return (
+                    <section key={cat.id} className="mb-6">
+                      <div className="mb-3">
+                        <h2 className="font-display text-[15.5px] font-bold">{cat.name}</h2>
+                        <p className="mt-0.5 text-[12.5px] text-[var(--color-text-tertiary)]">
+                          {catProducts.length} {catProducts.length === 1 ? 'صنف' : 'أصناف'}
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 min-[480px]:grid-cols-3">
+                        {catProducts.map((p, idx) => renderProduct(p, idx === 0 && catIdx === 0))}
+                      </div>
+                    </section>
+                  );
+                })}
+                {/* Uncategorized products (category deleted → SET NULL): keep them visible */}
+                {products.some((p) => !p.category_id) && (
+                  <section className="mb-6">
+                    <div className="mb-3">
+                      <h2 className="font-display text-[15.5px] font-bold">بدون تصنيف</h2>
+                      <p className="mt-0.5 text-[12.5px] text-[var(--color-text-tertiary)]">
+                        {products.filter((p) => !p.category_id).length}{' '}
+                        {products.filter((p) => !p.category_id).length === 1 ? 'صنف' : 'أصناف'}
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 min-[480px]:grid-cols-3">
+                      {products
+                        .filter((p) => !p.category_id)
+                        .map((p, idx) => renderProduct(p, idx === 0 && categories.length === 0))}
+                    </div>
+                  </section>
+                )}
+              </>
+            ) : (
+              /* Single category: flat list */
+              <div className="grid grid-cols-2 gap-3 min-[480px]:grid-cols-3">
+                {filtered.map((p, idx) => renderProduct(p, idx === 0))}
+              </div>
+            )}
+          </>
+        )}
+      </main>
+
+      {/* CART FLOATING BAR — ink bar (mockup), primary accents */}
+      {cartBadge && (
+        <div className="fixed inset-x-0 bottom-0 z-[var(--z-sticky)] p-3 pb-safe-bottom">
+          <div className="mx-auto w-full max-w-[480px] px-1 pb-1">
+            <button
+              type="button"
+              onClick={() => setCartOpen(true)}
+              className="relative flex w-full items-center justify-between gap-3 rounded-[var(--radius-lg)] bg-[var(--color-text)] px-4 py-3 text-white shadow-float transition-transform active:scale-[0.98]"
+            >
+              <span className="flex items-center gap-2.5">
+                <span className="flex h-[26px] w-[26px] items-center justify-center rounded-full bg-[var(--color-primary)] font-mono text-[12.5px] font-bold tabular-nums text-white">
+                  {itemCount}
+                </span>
+                <span className="text-[13.5px] font-semibold text-white/85">السلة</span>
+              </span>
+              <span className="flex items-center gap-3">
+                <span className="font-mono text-[14px] font-bold tabular-nums text-white" dir="ltr">
+                  {formatMoney(total, currency)}
+                </span>
+                <span className="rounded-[var(--radius-md)] bg-[var(--color-primary)] px-4 py-2.5 text-[13px] font-bold text-white">
+                  إتمام الطلب
+                </span>
+              </span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* PRODUCT PICKER SHEET */}
+      {picker && (
+        <Sheet onClose={() => setPicker(null)} title={picker.name}>
+          {picker.description && (
+            <p className="mb-3 text-sm text-[var(--color-text-secondary)]">
+              {picker.description}
+            </p>
+          )}
+          <p className="mb-3 text-base font-bold" style={{ color: "var(--color-primary)" }}>
+            {formatMoney(Number(picker.price), currency)}
+          </p>
+          {(picker.product_addons || []).filter((a) => a.is_available).length > 0 && (
+            <div className="mb-4">
+              <p className="section-title">إضافات</p>
+              <ul className="space-y-2">
+                {(picker.product_addons || [])
+                  .filter((a) => a.is_available)
+                  .map((a) => (
+                    <label
+                      key={a.id}
+                      className="flex items-center justify-between gap-2 rounded-[var(--radius-md)] border border-[var(--color-border)] px-3 py-2.5 text-sm"
+                    >
+                      <span className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={selectedAddons.includes(a.id)}
+                          onChange={(e) =>
+                            setSelectedAddons((prev) =>
+                              e.target.checked
+                                ? [...prev, a.id]
+                                : prev.filter((id) => id !== a.id)
+                            )
+                          }
+                          className="h-4 w-4"
+                        />
+                        {a.name}
+                      </span>
+                      <span className="text-xs text-[var(--color-text-secondary)]">
+                        +{formatMoney(Number(a.price), currency)}
+                      </span>
+                    </label>
+                  ))}
+              </ul>
+            </div>
+          )}
+          <div className="field">
+            <label className="label">ملاحظة على الصنف</label>
+            <input
+              className="input"
+              value={itemNotes}
+              onChange={(e) => {
+                if (e.target.value.length <= 200) setItemNotes(e.target.value);
+              }}
+              placeholder="مثال: بدون سكر"
+              maxLength={200}
+            />
+            <p className="hint">{itemNotes.length}/200</p>
+          </div>
+          <Button block onClick={confirmAdd} style={{ background: "var(--color-primary)" }}>
+            أضف إلى السلة
+          </Button>
+        </Sheet>
+      )}
+
+      {/* CART SHEET — FIX-C-003: extracted component */}
+      {cartOpen && (
+        <CartSheet
+          open={cartOpen}
+          lines={cart}
+          currency={currency}
+          orderNotes={orderNotes}
+          onOrderNotesChange={(v) => setOrderNotes(v)}
+          onQty={updateQty}
+          submitting={submitting}
+          orderError={orderError}
+          onRetry={() => {
+            setOrderError(null);
+            placeOrder();
+          }}
+          onPlaceOrder={placeOrder}
+          onClose={() => setCartOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
