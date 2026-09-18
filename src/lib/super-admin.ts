@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import type { Json } from '@/lib/database.types';
+import { getSiteUrl } from '@/lib/site-url';
 
 /**
  * Super-admin surface helpers (server-only).
@@ -113,7 +114,7 @@ export async function startImpersonation(input: {
   const { data: link, error: linkErr } = await admin.auth.admin.generateLink({
     type: 'magiclink',
     email: targetEmail,
-    options: { redirectTo: 'https://dokanstore.xyz/dashboard' },
+    options: { redirectTo: `${getSiteUrl()}/dashboard` },
   });
   if (linkErr || !link?.properties?.hashed_token) {
     throw new Error(`generateLink failed: ${linkErr?.message ?? 'no token'}`);

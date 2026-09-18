@@ -9,6 +9,11 @@ import path from 'node:path';
 
 export const TEST_PASSWORD = 'E2e-test-123!';
 
+/** Target environment for E2E runs. Defaults to the v3 production deploy —
+ *  NEVER dokanstore.xyz (that is v2's live DB). Override via E2E_BASE_URL. */
+export const E2E_BASE_URL = (process.env.E2E_BASE_URL || 'https://dokan-v3.vercel.app').replace(/\/$/, '');
+export const E2E_HOST = new URL(E2E_BASE_URL).hostname;
+
 function envVar(name: string): string {
   const raw = fs.readFileSync(path.resolve('.env.local'), 'utf-8');
   const m = raw.match(new RegExp(`^${name}\\s*=\\s*(.+)$`, 'm'));
@@ -68,7 +73,7 @@ export async function getAuthCookies(
   // complete session payload (tokens-only fails with a 302 to /login).
   const sessionJson = JSON.stringify(data.session);
   return [
-    { name: `sb-${ref}-auth-token`, value: sessionJson, domain: 'dokanstore.xyz', path: '/' },
+    { name: `sb-${ref}-auth-token`, value: sessionJson, domain: E2E_HOST, path: '/' },
   ];
 }
 

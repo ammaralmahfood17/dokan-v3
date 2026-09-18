@@ -1,13 +1,5 @@
 import { test, expect } from '@playwright/test';
-import {
-  createTestUser,
-  cleanupTestUser,
-  makeEmail,
-  TEST_PASSWORD,
-  admin,
-  url,
-  anonKey,
-} from './helpers';
+import { createTestUser, cleanupTestUser, makeEmail, TEST_PASSWORD, admin, url, anonKey, E2E_BASE_URL } from './helpers';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 /**
@@ -77,7 +69,7 @@ test.beforeAll(async () => {
     .single();
   tableBId = tblB!.id;
 
-  const orderRes = await fetch(`https://dokanstore.xyz/api/public/order`, {
+  const orderRes = await fetch(`${E2E_BASE_URL}/api/public/order`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

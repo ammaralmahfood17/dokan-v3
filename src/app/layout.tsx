@@ -3,6 +3,7 @@ import { Cairo } from 'next/font/google';
 import { Toaster } from 'sonner';
 import { ServiceWorkerRegister } from '@/components/service-worker-register';
 import { WebVitals } from '@/components/web-vitals';
+import { getSiteUrl } from '@/lib/site-url';
 // D15: install-to-homescreen prompt (beforeinstallprompt on Android/Chrome).
 import { InstallPrompt } from '@/components/ui/install-prompt';
 import './globals.css';
@@ -30,7 +31,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     locale: 'ar_BH',
-    url: 'https://www.dokanstore.xyz',
+    url: getSiteUrl(),
     siteName: 'دكان',
     title: 'دكان — منصة إدارة المطاعم',
     description: 'منصة سحابية لإدارة المطاعم والمقاهي في الخليج',

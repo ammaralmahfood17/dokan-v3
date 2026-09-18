@@ -1,14 +1,5 @@
 import { test, expect } from '@playwright/test';
-import {
-  createTestUser,
-  cleanupTestUser,
-  getAuthCookies,
-  makeEmail,
-  TEST_PASSWORD,
-  admin,
-  url,
-  anonKey,
-} from './helpers';
+import { createTestUser, cleanupTestUser, getAuthCookies, makeEmail, TEST_PASSWORD, admin, url, anonKey, E2E_BASE_URL, E2E_HOST } from './helpers';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 /**
@@ -99,13 +90,13 @@ test('non-super-admin is rejected at every super-admin API action', async () => 
   const normalCookie = `sb-${ref}-auth-token=${JSON.stringify(normalSess.session)}`;
   void cookie;
 
-  const renewRes = await fetch(`https://dokanstore.xyz/api/super-admin/renew?projectId=${testProjectId}`, {
+  const renewRes = await fetch(`${E2E_BASE_URL}/api/super-admin/renew?projectId=${testProjectId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Cookie: normalCookie },
   });
   expect(renewRes.status).toBe(403);
 
-  const deactRes = await fetch(`https://dokanstore.xyz/api/super-admin/deactivate?projectId=${testProjectId}`, {
+  const deactRes = await fetch(`${E2E_BASE_URL}/api/super-admin/deactivate?projectId=${testProjectId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Cookie: normalCookie },
   });
@@ -123,7 +114,7 @@ test('super-admin renew + deactivate work and write audit rows', async () => {
   const cookie = await authCookieHeader();
 
   // --- Renew ---
-  const renewRes = await fetch(`https://dokanstore.xyz/api/super-admin/renew?projectId=${testProjectId}`, {
+  const renewRes = await fetch(`${E2E_BASE_URL}/api/super-admin/renew?projectId=${testProjectId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Cookie: cookie },
   });
@@ -136,7 +127,7 @@ test('super-admin renew + deactivate work and write audit rows', async () => {
   expect(new Date(projAfterRenew?.subscription_expires_at as string).getTime()).toBeGreaterThan(Date.now());
 
   // --- Deactivate ---
-  const deactRes = await fetch(`https://dokanstore.xyz/api/super-admin/deactivate?projectId=${testProjectId}`, {
+  const deactRes = await fetch(`${E2E_BASE_URL}/api/super-admin/deactivate?projectId=${testProjectId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Cookie: cookie },
   });
@@ -192,7 +183,7 @@ test('Phase C: impersonation — start, banner, audit, end (session restored)', 
   await context.addCookies(adminCookies);
   const cookieHeader = adminCookies.map((c) => `${c.name}=${c.value}`).join('; ');
 
-  const res = await fetch(`https://dokanstore.xyz/api/super-admin/impersonate`, {
+  const res = await fetch(`${E2E_BASE_URL}/api/super-admin/impersonate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
     body: JSON.stringify({ targetUserId: normalUserId, projectId: testProjectId }),
@@ -208,10 +199,10 @@ test('Phase C: impersonation — start, banner, audit, end (session restored)', 
     {
       name: `sb-${new URL(url).hostname.split('.')[0]}-auth-token`,
       value: JSON.stringify(data.targetSession),
-      domain: 'dokanstore.xyz',
+      domain: E2E_HOST,
       path: '/',
     },
-    { name: 'dokan-impersonation', value: data.sessionId, domain: 'dokanstore.xyz', path: '/' },
+    { name: 'dokan-impersonation', value: data.sessionId, domain: E2E_HOST, path: '/' },
   ]);
 
   // 3. Dashboard shows the persistent banner with the target's identity.
@@ -228,7 +219,7 @@ test('Phase C: impersonation — start, banner, audit, end (session restored)', 
   expect((startLogs ?? []).length).toBeGreaterThan(0);
 
   // 5. End impersonation via the API → returns the admin's stored session.
-  const endRes = await fetch(`https://dokanstore.xyz/api/super-admin/impersonate/end`, {
+  const endRes = await fetch(`${E2E_BASE_URL}/api/super-admin/impersonate/end`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sessionId: data.sessionId }),
@@ -263,14 +254,14 @@ test('Phase D: create → archive (soft) → staff blocked → hard delete (name
 
   try {
     // 1. Create — owner must exist.
-    const badCreate = await fetch(`https://dokanstore.xyz/api/super-admin/create-project`, {
+    const badCreate = await fetch(`${E2E_BASE_URL}/api/super-admin/create-project`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
       body: JSON.stringify({ name: 'D Test', ownerEmail: 'nobody@dokan.test' }),
     });
     expect(badCreate.status).toBe(404);
 
-    const createRes = await fetch(`https://dokanstore.xyz/api/super-admin/create-project`, {
+    const createRes = await fetch(`${E2E_BASE_URL}/api/super-admin/create-project`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
       body: JSON.stringify({ name: 'D Test Store', ownerEmail, slug: createdSlug }),
@@ -290,14 +281,14 @@ test('Phase D: create → archive (soft) → staff blocked → hard delete (name
     expect((createLogs?.[0].metadata as { ownerEmail?: string })?.ownerEmail).toBe(ownerEmail);
 
     // 2. Archive — reason required.
-    const noReason = await fetch(`https://dokanstore.xyz/api/super-admin/archive-project`, {
+    const noReason = await fetch(`${E2E_BASE_URL}/api/super-admin/archive-project`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
       body: JSON.stringify({ projectId: dProjectId }),
     });
     expect(noReason.status).toBe(400);
 
-    const archiveRes = await fetch(`https://dokanstore.xyz/api/super-admin/archive-project`, {
+    const archiveRes = await fetch(`${E2E_BASE_URL}/api/super-admin/archive-project`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
       body: JSON.stringify({ projectId: dProjectId, reason: 'اختبار أرشفة' }),
@@ -333,7 +324,7 @@ test('Phase D: create → archive (soft) → staff blocked → hard delete (name
     await ctx2.close();
 
     // 4. Hard delete — wrong confirm name rejected.
-    const wrongName = await fetch(`https://dokanstore.xyz/api/super-admin/hard-delete-project`, {
+    const wrongName = await fetch(`${E2E_BASE_URL}/api/super-admin/hard-delete-project`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
       body: JSON.stringify({ projectId: dProjectId, confirmName: 'WRONG', reason: 'تنظيف' }),
@@ -341,7 +332,7 @@ test('Phase D: create → archive (soft) → staff blocked → hard delete (name
     expect(wrongName.status).toBe(400);
 
     // Correct name → deleted.
-    const delRes = await fetch(`https://dokanstore.xyz/api/super-admin/hard-delete-project`, {
+    const delRes = await fetch(`${E2E_BASE_URL}/api/super-admin/hard-delete-project`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
       body: JSON.stringify({ projectId: dProjectId, confirmName: 'D Test Store', reason: 'تنظيف نهائي' }),

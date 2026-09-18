@@ -1,14 +1,5 @@
 import { test, expect } from '@playwright/test';
-import {
-  createTestUser,
-  cleanupTestUser,
-  getAuthCookies,
-  makeEmail,
-  TEST_PASSWORD,
-  admin,
-  url,
-  anonKey,
-} from './helpers';
+import { createTestUser, cleanupTestUser, getAuthCookies, makeEmail, TEST_PASSWORD, admin, url, anonKey, E2E_BASE_URL } from './helpers';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 /**
@@ -37,7 +28,7 @@ test.afterAll(async () => {
 test('reset endpoint: rate-limited, no account enumeration', async () => {
   // First request → success (regardless of whether the account exists,
   // to avoid enumeration).
-  const res1 = await fetch(`https://dokanstore.xyz/api/auth/reset-password`, {
+  const res1 = await fetch(`${E2E_BASE_URL}/api/auth/reset-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email }),
@@ -45,7 +36,7 @@ test('reset endpoint: rate-limited, no account enumeration', async () => {
   expect(res1.status).toBe(200);
 
   // Non-existent account → ALSO success (no enumeration).
-  const res2 = await fetch(`https://dokanstore.xyz/api/auth/reset-password`, {
+  const res2 = await fetch(`${E2E_BASE_URL}/api/auth/reset-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email: 'does-not-exist-xyz@dokan.test' }),
@@ -54,7 +45,7 @@ test('reset endpoint: rate-limited, no account enumeration', async () => {
 
   // Second request for the SAME email within the window → still allowed
   // (limit is 2 per email / 5 min).
-  const res2b = await fetch(`https://dokanstore.xyz/api/auth/reset-password`, {
+  const res2b = await fetch(`${E2E_BASE_URL}/api/auth/reset-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email }),
@@ -62,7 +53,7 @@ test('reset endpoint: rate-limited, no account enumeration', async () => {
   expect(res2b.status).toBe(200);
 
   // Third request for the same email → rate limited (2 per email / 5 min).
-  const res3 = await fetch(`https://dokanstore.xyz/api/auth/reset-password`, {
+  const res3 = await fetch(`${E2E_BASE_URL}/api/auth/reset-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email }),
@@ -75,13 +66,13 @@ test('recovery link → set new password → new password works, old does not', 
 
   // 1. Mint a REAL recovery link via the admin API (what the email contains).
   // options.redirectTo IS honored (prod Site URL + allow list now include
-  // dokanstore.xyz — verified live; previously the link landed on a 404
+  // target origin — verified live; previously the link landed on a 404
   // preview domain). The app redirects straight to /update-password because
   // the session arrives in the URL fragment (server callback would drop it).
   const { data: link, error: linkErr } = await admin.auth.admin.generateLink({
     type: 'recovery',
     email,
-    options: { redirectTo: 'https://www.dokanstore.xyz/update-password' },
+    options: { redirectTo: `${E2E_BASE_URL}/update-password` },
   });
   expect(linkErr, linkErr?.message).toBeNull();
   const actionLink = link?.properties?.action_link;

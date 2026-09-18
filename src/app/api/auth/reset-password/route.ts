@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { rateLimit, createRateLimitResponse } from '@/lib/rate-limit';
+import { getSiteUrl } from '@/lib/site-url';
 
 /**
  * POST /api/auth/reset-password
@@ -30,8 +31,8 @@ export async function POST(request: Request) {
 
     const supabase = await createClient();
     // NEVER trust the Origin header for a security-critical email link — an
-    // attacker controls it and could harvest the recovery code. Use a fixed
-    // production origin (mirrors the previous fallback constant).
+    // attacker controls it and could harvest the recovery code. Use the
+    // configured deployment origin (NEXT_PUBLIC_SITE_URL) instead.
     //
     // IMPORTANT: redirect straight to /update-password, NOT /auth/callback.
     // The verify 303 lands with the session in the URL FRAGMENT
@@ -40,7 +41,7 @@ export async function POST(request: Request) {
     // client (createBrowserClient) parses the fragment on load, which is
     // exactly what /update-password does.
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: 'https://www.dokanstore.xyz/update-password',
+      redirectTo: `${getSiteUrl()}/update-password`,
     });
 
     if (error) {

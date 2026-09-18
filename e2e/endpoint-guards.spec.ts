@@ -1,12 +1,5 @@
 import { test, expect } from '@playwright/test';
-import {
-  createTestUser,
-  cleanupTestUser,
-  getAuthCookies,
-  makeEmail,
-  TEST_PASSWORD,
-  admin,
-} from './helpers';
+import { createTestUser, cleanupTestUser, getAuthCookies, makeEmail, TEST_PASSWORD, admin, E2E_BASE_URL, E2E_HOST } from './helpers';
 
 /**
  * Auth-guard sweep for the remaining untested endpoints (the audit flagged
@@ -30,7 +23,7 @@ test.afterAll(async () => {
 });
 
 test('unauthenticated requests are rejected across auxiliary endpoints', async () => {
-  const BASE = `https://dokanstore.xyz`;
+  const BASE = `${E2E_BASE_URL}`;
 
   // Telegram webhook — fail closed: on prod the secret IS configured, so
   // a request without the correct header → 401 (never processed).
@@ -101,5 +94,5 @@ test('authenticated user can reach protected helper endpoints', async ({ page, c
   // session works and nothing 401s).
   await page.goto('/dashboard');
   await page.waitForURL(/\/onboarding|\/dashboard/, { timeout: 20_000 });
-  expect(page.url()).toContain('dokanstore.xyz');
+  expect(page.url()).toContain(E2E_HOST);
 });

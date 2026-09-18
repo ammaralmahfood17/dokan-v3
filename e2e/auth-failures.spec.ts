@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { createTestUser, cleanupTestUser, makeEmail, TEST_PASSWORD } from './helpers';
+import { createTestUser, cleanupTestUser, makeEmail, TEST_PASSWORD, E2E_BASE_URL, E2E_HOST } from './helpers';
 
 /**
  * P2-6 — auth failure paths.
@@ -39,7 +39,7 @@ test('wrong password → clean error, no crash', async ({ page }) => {
 });
 
 test('staff-only API without session → 401', async () => {
-  const res = await fetch(`https://dokanstore.xyz/api/pos/cancel`, {
+  const res = await fetch(`${E2E_BASE_URL}/api/pos/cancel`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ orderId: '00000000-0000-0000-0000-000000000000' }),
@@ -51,7 +51,7 @@ test('garbage session cookie → treated as guest (redirect), not a 500', async 
   // Inject a malformed session cookie for the app's cookie name.
   const cookieName = 'sb-smhleaeujwfebefjuwoe-auth-token';
   await context.addCookies([
-    { name: cookieName, value: 'garbage-not-a-jwt', domain: 'dokanstore.xyz', path: '/' },
+    { name: cookieName, value: 'garbage-not-a-jwt', domain: E2E_HOST, path: '/' },
   ]);
   const resp = await page.goto('/dashboard');
   expect(resp?.status()).toBeLessThan(400);

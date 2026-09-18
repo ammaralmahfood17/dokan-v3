@@ -1,14 +1,5 @@
 import { test, expect } from '@playwright/test';
-import {
-  createTestUser,
-  cleanupTestUser,
-  getAuthCookies,
-  makeEmail,
-  TEST_PASSWORD,
-  admin,
-  url,
-  anonKey,
-} from './helpers';
+import { createTestUser, cleanupTestUser, getAuthCookies, makeEmail, TEST_PASSWORD, admin, url, anonKey, E2E_BASE_URL } from './helpers';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 /**
@@ -93,7 +84,7 @@ test('expired subscription: dashboard blocked, public ordering blocked', async (
   expect(afterFlip?.is_active).toBe(false);
 
   // Public order route must now reject the store.
-  const orderRes = await fetch(`https://dokanstore.xyz/api/public/order`, {
+  const orderRes = await fetch(`${E2E_BASE_URL}/api/public/order`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -144,7 +135,7 @@ test('renewal: owner self-renewal rejected, super admin renews and restores', as
   await expect(page.getByRole('heading', { name: /مرحبًا، Sub Test/ }).first()).toBeVisible({ timeout: 20_000 });
 
   // Public ordering works again.
-  const orderRes = await fetch(`https://dokanstore.xyz/api/public/order`, {
+  const orderRes = await fetch(`${E2E_BASE_URL}/api/public/order`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

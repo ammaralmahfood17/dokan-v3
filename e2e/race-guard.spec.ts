@@ -1,14 +1,5 @@
 import { test, expect } from '@playwright/test';
-import {
-  createTestUser,
-  cleanupTestUser,
-  getAuthCookies,
-  makeEmail,
-  TEST_PASSWORD,
-  admin,
-  url,
-  anonKey,
-} from './helpers';
+import { createTestUser, cleanupTestUser, getAuthCookies, makeEmail, TEST_PASSWORD, admin, url, anonKey, E2E_BASE_URL } from './helpers';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 /**
@@ -71,7 +62,7 @@ async function setupStore() {
 async function placeOrder(): Promise<{ orderId: string; orderNumber: number }> {
   const res = await fetch(`${url}/rest/v1/rpc/none`, { method: 'POST' }).catch(() => null);
   void res;
-  const apiRes = await fetch(`https://dokanstore.xyz/api/public/order`, {
+  const apiRes = await fetch(`${E2E_BASE_URL}/api/public/order`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -150,7 +141,7 @@ test('race guard: cancelled order cannot be revived via stale advance (H1)', asy
   // cookie the browser would hold.
   const { data: sess } = await authed.auth.getSession();
   const ref = new URL(url).hostname.split('.')[0];
-  const cancelRes = await fetch(`https://dokanstore.xyz/api/pos/cancel`, {
+  const cancelRes = await fetch(`${E2E_BASE_URL}/api/pos/cancel`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -199,7 +190,7 @@ test('tenant guard (F1): advancing another project’s order is rejected 42501',
     .single();
 
   // Place an order in the OTHER project (admin can, as service_role).
-  const apiRes = await fetch(`https://dokanstore.xyz/api/public/order`, {
+  const apiRes = await fetch(`${E2E_BASE_URL}/api/public/order`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

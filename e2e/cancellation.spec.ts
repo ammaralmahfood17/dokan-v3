@@ -1,13 +1,5 @@
 import { test, expect } from '@playwright/test';
-import {
-  createTestUser,
-  cleanupTestUser,
-  makeEmail,
-  TEST_PASSWORD,
-  admin,
-  url,
-  anonKey,
-} from './helpers';
+import { createTestUser, cleanupTestUser, makeEmail, TEST_PASSWORD, admin, url, anonKey, E2E_BASE_URL } from './helpers';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 /**
@@ -30,7 +22,7 @@ let productId: string;
 let authed: SupabaseClient;
 
 async function placeOrder(): Promise<string> {
-  const res = await fetch(`https://dokanstore.xyz/api/public/order`, {
+  const res = await fetch(`${E2E_BASE_URL}/api/public/order`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -47,7 +39,7 @@ async function placeOrder(): Promise<string> {
 let authCookieHeader = '';
 
 async function cancelOrder(orderId: string): Promise<{ status: number; body: unknown }> {
-  const res = await fetch(`https://dokanstore.xyz/api/pos/cancel`, {
+  const res = await fetch(`${E2E_BASE_URL}/api/pos/cancel`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(authCookieHeader ? { Cookie: authCookieHeader } : {}) },
     body: JSON.stringify({ orderId }),

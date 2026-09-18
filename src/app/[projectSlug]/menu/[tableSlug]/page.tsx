@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import { unstable_cache } from 'next/cache';
 import { createAnonClient } from '@/lib/supabase/anon';
+import { getSiteUrl } from '@/lib/site-url';
 import { MenuClient } from './menu-client';
 import type { Category, Product, ProductAddon, Project, Table } from '@/lib/types';
 
@@ -109,7 +110,7 @@ export default async function PublicMenuPage({
             '@context': 'https://schema.org',
             '@type': 'Restaurant',
             name: project.name,
-            url: `https://www.dokanstore.xyz/${projectSlug}`,
+            url: `${getSiteUrl()}/${projectSlug}`,
             servesCuisine: 'Gulf',
           },
         } as object)}

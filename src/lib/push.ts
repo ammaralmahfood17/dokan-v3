@@ -1,4 +1,5 @@
 import { createAdminClient } from './supabase/admin';
+import { getSiteUrl } from './site-url';
 
 export interface PushPayload {
   title: string;
@@ -26,7 +27,9 @@ export async function sendPushToProject(
   const webpush = await import('web-push');
   const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!;
   const privateKey = process.env.VAPID_PRIVATE_KEY!;
-  const contact = process.env.VAPID_CONTACT || 'mailto:admin@dokanstore.xyz';
+  const contact =
+    process.env.VAPID_CONTACT ||
+    `mailto:admin@${new URL(getSiteUrl()).hostname}`;
 
   if (!publicKey || !privateKey) {
     console.warn('[Push] VAPID keys not configured — skipping');

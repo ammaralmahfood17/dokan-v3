@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { generateSlug } from '@/lib/utils';
+import { getSiteHost } from '@/lib/site-url';
 import { CURRENCIES, DEFAULT_PRIMARY_COLOR } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { createClient } from '@/lib/supabase/client';
@@ -170,7 +171,7 @@ export default function OnboardingPage() {
               <div className="card card-body bg-[var(--color-bg)]">
                 <p className="text-xs text-[var(--color-text-muted)]">معاينة الرابط:</p>
                 <p className="mt-1 text-sm font-bold" dir="ltr">
-                  dokanstore.xyz/menu/{effectiveSlug || '…'}/table-1
+                  {getSiteHost()}/menu/{effectiveSlug || '…'}/table-1
                 </p>
               </div>
 
