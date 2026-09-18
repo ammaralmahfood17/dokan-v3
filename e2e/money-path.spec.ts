@@ -82,8 +82,8 @@ test('money path: signup → store → product → table → order → kitchen',
   await page.getByRole('button', { name: 'بدء التحضير', exact: true }).first().click();
   await expect(page.getByRole('button', { name: 'جاهز للتسليم', exact: true }).first()).toBeVisible({ timeout: 15_000 });
   await page.getByRole('button', { name: 'جاهز للتسليم', exact: true }).first().click();
-  // Item lands in ready column (deliver button appears)
-  await expect(page.getByRole('button', { name: 'تم التسليم', exact: true }).first()).toBeVisible({ timeout: 15_000 });
+  // Item lands in ready column (v3 renders the button label as "تم التسليم ✓")
+  await expect(page.getByRole('button', { name: 'تم التسليم' }).first()).toBeVisible({ timeout: 15_000 });
 
   // ---------- 8) ORDERS BOARD: order auto-advanced to ready ----------
   await page.goto('/dashboard/orders');
