@@ -9,9 +9,11 @@ import path from 'node:path';
 
 export const TEST_PASSWORD = 'E2e-test-123!';
 
-/** Target environment for E2E runs. Defaults to the v3 production deploy —
- *  NEVER dokanstore.xyz (that is v2's live DB). Override via E2E_BASE_URL. */
-export const E2E_BASE_URL = (process.env.E2E_BASE_URL || 'https://dokan-v3.vercel.app').replace(/\/$/, '');
+/** Target environment for E2E runs. dokanstore.xyz is the canonical v3
+ *  production domain (v2 was deleted 2026-09-18; the old "never point here"
+ *  warning applied to v2's DB behind this domain, now gone).
+ *  Override via E2E_BASE_URL. */
+export const E2E_BASE_URL = (process.env.E2E_BASE_URL || 'https://dokanstore.xyz').replace(/\/$/, '');
 export const E2E_HOST = new URL(E2E_BASE_URL).hostname;
 
 function envVar(name: string): string {

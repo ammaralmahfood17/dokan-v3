@@ -134,7 +134,7 @@ export default async function SuperAdminSubscriptionsPage({
       </div>
 
       <div className="card overflow-x-auto">
-        <table className="w-full min-w-[640px] text-right text-sm">
+        <table className="w-full min-w-[640px] text-start text-sm">
           {/* FIX-T-004: رأس ثابت عند التمرير (جدول الاشتراكات طويل) */}
           <thead className="sticky top-0 z-[var(--z-sticky)] bg-[var(--color-surface)]">
             <tr className="border-b border-[var(--color-border)] text-xs text-[var(--color-text-secondary)]">

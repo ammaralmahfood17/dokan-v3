@@ -111,7 +111,7 @@ export default async function SuperAdminAuditPage({
       </form>
 
       <div className="card overflow-x-auto">
-        <table className="w-full min-w-[720px] text-right text-sm">
+        <table className="w-full min-w-[720px] text-start text-sm">
           <thead>
             <tr className="border-b border-[var(--color-border)] text-xs text-[var(--color-text-secondary)]">
               <th className="px-3 py-2.5 font-semibold">الوقت</th>

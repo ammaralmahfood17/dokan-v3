@@ -289,6 +289,7 @@ export default function OnboardingPage() {
                     className="input flex-1"
                     dir="ltr"
                     value={primaryColor}
+                    maxLength={7}
                     onChange={(e) => setPrimaryColor(e.target.value)}
                     pattern="^#[0-9A-Fa-f]{6}$"
                   />

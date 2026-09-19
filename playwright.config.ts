@@ -1,10 +1,9 @@
 import { defineConfig } from '@playwright/test';
 
 /**
- * E2E against the v3 PRODUCTION deploy (override with E2E_BASE_URL) — the
- * real money path. Never point this at dokanstore.xyz: that is v2's live DB.
- * Tests create an isolated test store (unique slug) and clean up after
- * themselves (orders, tables, products, store, auth user).
+ * E2E against the canonical production domain dokanstore.xyz (override with
+ * E2E_BASE_URL) — the real money path. Tests create an isolated test store
+ * (unique slug) and clean up after themselves.
  */
 export default defineConfig({
   testDir: './e2e',
@@ -14,7 +13,7 @@ export default defineConfig({
   workers: 1,
   reporter: [['list']],
   use: {
-    baseURL: process.env.E2E_BASE_URL || 'https://dokan-v3.vercel.app',
+    baseURL: process.env.E2E_BASE_URL || 'https://dokanstore.xyz',
     viewport: { width: 390, height: 844 },
     locale: 'ar-BH',
     trace: 'retain-on-failure',

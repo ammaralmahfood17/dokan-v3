@@ -177,7 +177,7 @@ export async function createSecureOrder(
       quantity,
       unit_price: unitPrice,
       addons: addonDetails,
-      notes: item.notes?.trim() || null,
+      notes: itemNotes.trim() || null,
     });
   }
 

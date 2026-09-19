@@ -214,6 +214,7 @@ export function SettingsClient({
               className={`input flex-1 ${errors.color ? 'input-error' : ''}`}
               dir="ltr"
               value={primaryColor}
+              maxLength={7}
               onChange={(e) => setPrimaryColor(e.target.value)}
               pattern="^#[0-9A-Fa-f]{6}$"
             />

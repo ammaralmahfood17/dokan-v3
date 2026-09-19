@@ -122,7 +122,7 @@ export function ImageUploader({
             type="button"
             onClick={removeImage}
             aria-label="إزالة الصورة"
-            className="absolute -right-3 -top-3 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full"
+            className="absolute -end-3 -top-3 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full"
           >
             <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-danger)] text-white transition-transform hover:scale-110">
               <X className="h-3.5 w-3.5" />

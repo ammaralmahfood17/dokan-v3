@@ -89,6 +89,7 @@ export default function RegisterPage() {
               id="fullName"
               className="input"
               required
+              maxLength={80}
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
             />
@@ -103,6 +104,7 @@ export default function RegisterPage() {
               type="email"
               autoComplete="email"
               required
+              maxLength={254}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               onBlur={() => setTouched((t) => ({ ...t, email: true }))}

@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { getCurrentProject } from '@/lib/project';
+import { getSiteUrl } from '@/lib/site-url';
 import { createClient } from '@/lib/supabase/server';
 import { TablesClient } from './tables-client';
 import type { Table } from '@/lib/types';
@@ -28,9 +29,7 @@ export default async function TablesPage() {
     (activeOrders ?? []).map((o) => o.table_id).filter(Boolean)
   );
 
-  const siteUrl =
-    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ||
-    'http://localhost:3000';
+  const siteUrl = getSiteUrl();
 
   return (
     <TablesClient

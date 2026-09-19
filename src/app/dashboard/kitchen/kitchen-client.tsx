@@ -303,6 +303,7 @@ export function KitchenClient({
     // so orders took up to 30s to appear (30s fallback poll). Without the
     // filter, events arrive in ~1s and cross-tenant events are still
     // blocked by RLS. See migration 0018 note.
+    const itemRefetchTimers = new Map<string, ReturnType<typeof setTimeout>>();
     const channel = supabase
       .channel(`kds-${projectId}`)
       .on(
@@ -360,7 +361,18 @@ export function KitchenClient({
           // before fetching — other tenants' updates are pure noise.
           const itemOrderId = (payload.new as { order_id: string }).order_id;
           if (!knownOrderIdsRef.current.has(itemOrderId)) return;
-          void refetchOrder(itemOrderId);
+          // Trailing-debounce per order (500ms, orders-client pattern): a
+          // burst of order_items UPDATEs (POS editing several lines) must
+          // collapse into ONE refetch of that order.
+          const pending = itemRefetchTimers.get(itemOrderId);
+          if (pending) clearTimeout(pending);
+          itemRefetchTimers.set(
+            itemOrderId,
+            setTimeout(() => {
+              itemRefetchTimers.delete(itemOrderId);
+              void refetchOrder(itemOrderId);
+            }, 500)
+          );
         }
       )
       .subscribe();
@@ -369,6 +381,8 @@ export function KitchenClient({
     const interval = setInterval(() => void fullRefresh(), 30000);
 
     return () => {
+      itemRefetchTimers.forEach((t) => clearTimeout(t));
+      itemRefetchTimers.clear();
       void supabase.removeChannel(channel);
       clearInterval(interval);
     };

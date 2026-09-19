@@ -86,6 +86,7 @@ function LoginForm() {
           type="email"
           autoComplete="email"
           required
+          maxLength={254}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           onBlur={blur('email')}

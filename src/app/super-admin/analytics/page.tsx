@@ -30,8 +30,10 @@ type ProjectRow = {
   is_active: boolean;
 };
 
-/** Asia/Bahrain day bounds (Vercel runs UTC — never use server-local "today"). */
-function bahrainBounds(daysAgoStart: number, daysAgoEndExclusive: number): { start: string; end: string } {
+/** Asia/Bahrain day bounds (Vercel runs UTC — never use server-local "today").
+ *  daysAgoStart..daysAgoEndInclusive are whole Bahrain calendar days back from
+ *  today (0 = today). Returns an ISO [start, end) window covering them. */
+function bahrainBounds(daysAgoStart: number, daysAgoEndInclusive: number): { start: string; end: string } {
   const now = new Date();
   // Convert to Bahrain wall-clock
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -45,7 +47,7 @@ function bahrainBounds(daysAgoStart: number, daysAgoEndExclusive: number): { sta
   const d = Number(parts.find((p) => p.type === 'day')!.value);
   const todayStart = new Date(Date.UTC(y, m - 1, d)); // midnight Bahrain = this UTC instant
   const start = new Date(todayStart.getTime() - daysAgoStart * 86400e3);
-  const end = new Date(todayStart.getTime() + (daysAgoEndExclusive - daysAgoStart) * 86400e3);
+  const end = new Date(todayStart.getTime() - daysAgoEndInclusive * 86400e3 + 86400e3);
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
@@ -84,9 +86,9 @@ export default async function SuperAdminAnalyticsPage({
   const totalRevenue = completedOrders.reduce((s, o) => s + Number(o.total_amount), 0);
   const totalOrders = completedOrders.length;
 
-  const today = bahrainBounds(0, 1);
-  const week = bahrainBounds(6, 1); // last 7 days incl today
-  const month = bahrainBounds(29, 1); // last 30 days incl today
+  const today = bahrainBounds(0, 0);
+  const week = bahrainBounds(6, 0); // last 7 days incl today
+  const month = bahrainBounds(29, 0); // last 30 days incl today
 
   const sumBetween = (rows: OrderRow[], start: string, end: string) =>
     rows
@@ -100,7 +102,7 @@ export default async function SuperAdminAnalyticsPage({
   // Trend: last 14 days by Bahrain date
   const trendDays: { label: string; revenue: number; orders: number }[] = [];
   for (let i = 13; i >= 0; i--) {
-    const b = bahrainBounds(i, i + 1);
+    const b = bahrainBounds(i, i);
     const dayOrders = completedOrders.filter((o) => o.created_at >= b.start && o.created_at < b.end);
     const label = new Intl.DateTimeFormat('ar', {
       numberingSystem: 'latn',
@@ -213,7 +215,7 @@ export default async function SuperAdminAnalyticsPage({
 
       {/* Per-project table */}
       <div className="card overflow-x-auto">
-        <table className="w-full min-w-[680px] text-right text-sm">
+        <table className="w-full min-w-[680px] text-start text-sm">
           <thead>
             <tr className="border-b border-[var(--color-border)] text-xs text-[var(--color-text-secondary)]">
               <th className="px-3 py-2.5 font-semibold">المتجر</th>
