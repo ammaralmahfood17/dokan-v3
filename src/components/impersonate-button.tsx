@@ -49,7 +49,8 @@ export function ImpersonateButton({
         access_token: data.targetSession.access_token,
         refresh_token: data.targetSession.refresh_token,
       });
-      document.cookie = `dokan-impersonation=${data.sessionId}; path=/; max-age=${60 * 60 * 12}`;
+      // dokan-impersonation marker is set by the API response (httpOnly —
+      // see impersonate/route.ts). Never write it from JS.
       toast.success(`دخلت باسم ${ownerEmail}`);
       router.push('/dashboard');
       router.refresh();

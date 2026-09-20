@@ -29,10 +29,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'بيانات غير صالحة' }, { status: 400 });
     }
 
-    // Rate limit per project + per IP (keyPrefix is applied by rateLimit, so
-    // no duplicate 'public-order:' prefix in the key itself)
+    // Rate limit per (project, IP) + per IP. A slug-only budget let one
+    // client 429 an entire store's ordering (2026-09-20 hardening: key
+    // includes the caller IP so the store budget is per customer; the
+    // separate ip key still caps one IP across stores).
     const ip = getClientIp(request);
-    const rateKey = projectSlug;
+    const rateKey = `${projectSlug}:${ip}`;
     // Two independent rate-limit checks — run in parallel (each is a DB
     // round-trip; serializing them added ~250ms of pure latency).
     const [limitResult, ipLimitResult] = await Promise.all([

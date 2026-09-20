@@ -48,7 +48,6 @@ export default async function DashboardLayout({
       {/* Phase C: persistent support-mode banner (top of every dashboard page) */}
       {impersonation && (
         <ImpersonationBanner
-          sessionId={impSessionId}
           targetEmail={impersonation.targetEmail}
           expiresAt={impersonation.expiresAt}
           expired={impersonation.expired}

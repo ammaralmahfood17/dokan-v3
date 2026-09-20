@@ -218,15 +218,31 @@ test('Phase C: impersonation — start, banner, audit, end (session restored)', 
     .eq('target_user_id', normalUserId);
   expect((startLogs ?? []).length).toBeGreaterThan(0);
 
-  // 5. End impersonation via the API → returns the admin's stored session.
+  // 5. End impersonation via the API. 2026-09-20 hardening contract: the
+  // httpOnly marker cookie (set at start) is the ONLY credential — body is
+  // empty, and the response must NEVER carry the admin's tokens; restoration
+  // happens via Set-Cookie on this response.
   const endRes = await fetch(`${E2E_BASE_URL}/api/super-admin/impersonate/end`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId: data.sessionId }),
+    headers: {
+      Cookie: `${cookieHeader}; sb-${new URL(url).hostname.split('.')[0]}-auth-token=${encodeURIComponent(JSON.stringify(data.targetSession))}; dokan-impersonation=${data.sessionId}`,
+    },
   });
   const endData = await endRes.json();
   expect(endRes.status, JSON.stringify(endData)).toBe(200);
-  expect(endData.superAdminSession?.access_token).toBeTruthy();
+  expect(endData.ok).toBe(true);
+  expect(endData.restored, 'admin session should be restored server-side').toBe(true);
+  expect(endData.superAdminSession, 'HARDENING: admin tokens must never transit the response body').toBeUndefined();
+  const endSetCookies = endRes.headers.get('set-cookie') ?? '';
+  expect(endSetCookies.includes('auth-token'), 'restored session must arrive via Set-Cookie').toBe(true);
+
+  // 5b. Negative: ending again (marker consumed/cleared) is not authorized.
+  const endAgain = await fetch(`${E2E_BASE_URL}/api/super-admin/impersonate/end`, {
+    method: 'POST',
+    headers: { Cookie: `dokan-impersonation=${data.sessionId}` },
+  });
+  expect(endAgain.status, 'a stale marker must not resurrect an ended session').toBe(200);
+  expect((await endAgain.json()).ok).toBe(false);
 
   // 6. Audit end row exists.
   const { data: endLogs } = await admin

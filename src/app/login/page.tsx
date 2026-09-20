@@ -82,6 +82,7 @@ function LoginForm() {
         <label className="label" htmlFor="email">البريد الإلكتروني</label>
         <input
           id="email"
+          name="email"
           className={`input ${emailErr ? 'input-error' : ''}`}
           type="email"
           autoComplete="email"
@@ -105,11 +106,13 @@ function LoginForm() {
         <div className="relative">
           <input
             id="password"
+            name="password"
             className={`input pe-10 ${passErr ? 'input-error' : ''}`}
             type={showPass ? 'text' : 'password'}
             autoComplete="current-password"
             required
             minLength={6}
+            maxLength={72}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             onBlur={blur('password')}

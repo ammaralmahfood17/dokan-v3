@@ -133,11 +133,13 @@ export default function UpdatePasswordPage() {
             <div className="relative">
               <input
                 id="password"
+                name="new-password"
                 className="input pe-10"
                 type={showPass ? 'text' : 'password'}
                 autoComplete="new-password"
                 required
                 minLength={6}
+                maxLength={72}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 dir="ltr"
@@ -159,11 +161,13 @@ export default function UpdatePasswordPage() {
             <label className="label" htmlFor="confirm">تأكيد كلمة المرور</label>
             <input
               id="confirm"
+              name="confirm-password"
               className="input"
               type={showPass ? 'text' : 'password'}
               autoComplete="new-password"
               required
               minLength={6}
+              maxLength={72}
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               dir="ltr"

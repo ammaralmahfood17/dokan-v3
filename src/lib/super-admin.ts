@@ -18,6 +18,19 @@ import { getSiteUrl } from '@/lib/site-url';
  *   call `logSuperAdminAction` — a missing audit row is treated as a bug.
  */
 
+/** httpOnly marker cookie set by /api/super-admin/impersonate and read by
+ *  the dashboard layout + end route. Never exposed to page JS (2026-09-20
+ *  hardening: the value alone must not authorize ending a session). */
+export const MARKER_COOKIE = 'dokan-impersonation';
+
+/** Shape of the session objects we mint and store server-side ourselves. */
+export type StoredSession = {
+  access_token: string;
+  refresh_token: string;
+  expires_in?: number;
+  token_type?: string;
+};
+
 export type SuperAdminAction =
   | 'subscription.renew'
   | 'project.deactivate'

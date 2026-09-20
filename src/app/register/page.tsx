@@ -87,6 +87,7 @@ export default function RegisterPage() {
             </label>
             <input
               id="fullName"
+              name="fullName"
               className="input"
               required
               maxLength={80}
@@ -100,6 +101,7 @@ export default function RegisterPage() {
             </label>
             <input
               id="email"
+              name="email"
               className={`input ${emailErr ? 'input-error' : ''}`}
               type="email"
               autoComplete="email"
@@ -118,11 +120,13 @@ export default function RegisterPage() {
             </label>
             <input
               id="password"
+              name="password"
               className={`input ${passErr ? 'input-error' : ''}`}
               type="password"
               autoComplete="new-password"
               required
               minLength={6}
+              maxLength={72}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               onBlur={() => setTouched((t) => ({ ...t, password: true }))}

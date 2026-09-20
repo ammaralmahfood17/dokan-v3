@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
 import { createClient } from '@/lib/supabase/server';
-import { startImpersonation, logSuperAdminAction } from '@/lib/super-admin';
+import { startImpersonation, logSuperAdminAction, MARKER_COOKIE } from '@/lib/super-admin';
 import type { Json } from '@/lib/database.types';
 
 /**
@@ -52,12 +52,24 @@ export async function POST(request: NextRequest) {
 
     const response = NextResponse.json({
       ok: true,
+      // sessionId stays in the body for the e2e harness; with the 2026-09-20
+      // hardening it grants nothing by itself — only this browser's httpOnly
+      // marker cookie can end the session.
       sessionId: result.sessionId,
       expiresAt: result.expiresAt,
       targetSession: result.targetSession,
     });
-    // The client sets the session cookie (non-httpOnly swap happens via the
-    // browser-side supabase client with the minted tokens).
+    // Support-mode marker: httpOnly so page JS (including any XSS on public
+    // surfaces) can never read it. The end route is the only consumer.
+    response.cookies.set(MARKER_COOKIE, result.sessionId, {
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 12 * 60 * 60,
+    });
+    // The client swaps the session cookie (browser-side supabase client with
+    // the minted tokens); the marker above is set by this response.
     return response;
   } catch (err) {
     const message = err instanceof Error ? err.message : 'unknown';

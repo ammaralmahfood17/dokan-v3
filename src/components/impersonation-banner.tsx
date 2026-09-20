@@ -1,27 +1,26 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 
 /**
  * Persistent support-mode banner. Rendered by the dashboard layout while an
- * impersonation session is active. One-click end: swaps the auth cookie back
- * to the super admin's stored session, clears the marker, reloads.
+ * impersonation session is active. One-click end: the API authenticates via
+ * the httpOnly marker cookie, restores the super admin's session server-side
+ * (tokens never transit JS since 2026-09-20 hardening) and clears the
+ * marker; we just reload out of the target's dashboard.
  *
  * The marker cookie is read server-side by the layout; this component only
- * receives the display data + sessionId.
+ * receives the display data.
  */
 export function ImpersonationBanner({
   targetEmail,
   expiresAt,
-  sessionId,
   expired = false,
 }: {
   targetEmail: string;
   expiresAt: string;
-  sessionId: string;
   expired?: boolean;
 }) {
   const router = useRouter();
@@ -39,27 +38,20 @@ export function ImpersonationBanner({
     if (ending) return;
     setEnding(true);
     try {
-      const res = await fetch('/api/super-admin/impersonate/end', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId }),
-      });
+      // No sessionId in the body — the httpOnly marker cookie authenticates
+      // this browser as the one that started the impersonation.
+      const res = await fetch('/api/super-admin/impersonate/end', { method: 'POST' });
       const data = await res.json();
-      if (!res.ok) {
+      if (!res.ok || !data.ok) {
         toast.error(data.error || 'فشل إنهاء الجلسة');
         setEnding(false);
         return;
       }
-      // Swap the auth cookie back to the super admin's own session.
-      if (data.superAdminSession) {
-        const supabase = createClient();
-        await supabase.auth.setSession({
-          access_token: data.superAdminSession.access_token,
-          refresh_token: data.superAdminSession.refresh_token,
-        });
+      if (!data.restored) {
+        toast('انتهت جلسة الدعم — سجّل دخولك من جديد');
       }
-      // Clear the marker cookie and reload.
-      document.cookie = 'dokan-impersonation=; path=/; max-age=0';
+      // Auth cookies were already swapped server-side; leave the target's
+      // dashboard for the super-admin area and refresh.
       router.push('/super-admin/subscriptions');
       router.refresh();
     } catch {

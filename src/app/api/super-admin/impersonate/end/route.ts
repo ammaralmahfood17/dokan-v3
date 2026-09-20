@@ -1,58 +1,73 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
 import { createClient } from '@/lib/supabase/server';
-import { endImpersonation, logSuperAdminAction } from '@/lib/super-admin';
-import type { Json } from '@/lib/database.types';
+import { endImpersonation, logSuperAdminAction, MARKER_COOKIE, type StoredSession } from '@/lib/super-admin';
 
 /**
  * POST /api/super-admin/impersonate/end
- * Body: { sessionId: string }
  *
- * Ends the impersonation: marks the row ended, restores the super admin's
- * own session (returns it for cookie swap-back), and writes an audit end
- * entry. Called from the banner's "إنهاء الجلسة" button AND from the auto-
- * expiry path (expired session detected by the layout).
+ * Ends the impersonation for THIS browser — proven by the httpOnly
+ * dokan-impersonation marker cookie set at start (2026-09-20 hardening:
+ * previously any caller who knew the sessionId could terminate the session
+ * AND receive the super admin's live tokens in the response body; the
+ * marker is now the sole credential and is invisible to page JS).
+ *
+ * The admin's own session is restored SERVER-SIDE (setSession writes the
+ * auth cookies on this response) — super admin tokens are never returned in
+ * a body again. Marks the row ended and writes an audit end entry. The
+ * caller's current auth cookies (the TARGET's session) are never signed out
+ * here — that would log the store owner out of their own devices.
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as { sessionId?: string };
-    if (!body.sessionId || typeof body.sessionId !== 'string') {
-      return NextResponse.json({ error: 'sessionId مطلوب' }, { status: 400 });
+    const marker = request.cookies.get(MARKER_COOKIE)?.value;
+    if (!marker || marker.length !== 36) {
+      return NextResponse.json({ error: 'غير مصرح' }, { status: 401 });
     }
 
-    // The impersonated session may be expired — authenticate loosely: any
-    // signed-in user with the matching marker can end it, and the audit
-    // records the actor from the stored row. We look up the row first.
-    const userClient = await createClient();
-    const {
-      data: { user },
-    } = await userClient.auth.getUser();
+    const result = await endImpersonation(marker);
+    let restored = false;
 
-    const result = await endImpersonation(body.sessionId);
-    if (!result) {
-      return NextResponse.json({ error: 'الجلسة غير موجودة أو منتهية' }, { status: 404 });
+    if (result) {
+      // Restore the super admin's own session server-side. (StoredSession
+      // type = the tokens we minted ourselves at start; the Json column type
+      // is too wide for tsc here.)
+      const adminSession = result.superAdminSession as unknown as StoredSession | null;
+      if (adminSession) {
+        try {
+          const userClient = await createClient();
+          const { error } = await userClient.auth.setSession({
+            access_token: adminSession.access_token,
+            refresh_token: adminSession.refresh_token,
+          });
+          restored = !error;
+        } catch {
+          restored = false; // stale refresh token — admin must re-login
+        }
+      }
+
+      // Audit with the original super admin as actor (from the stored row).
+      const admin = (await import('@/lib/supabase/admin')).createAdminClient();
+      const { data: row } = await admin
+        .from('impersonation_sessions')
+        .select('super_admin_user_id, target_project_id')
+        .eq('id', marker)
+        .maybeSingle();
+
+      await logSuperAdminAction({
+        actorUserId: (row?.super_admin_user_id as string) ?? 'unknown',
+        action: 'impersonation.end',
+        targetProjectId: (row?.target_project_id as string | null) ?? null,
+        targetUserId: result.targetUserId,
+        metadata: { sessionId: marker, restored },
+      });
     }
 
-    // Audit with the original super admin as actor (from the stored row).
-    const admin = (await import('@/lib/supabase/admin')).createAdminClient();
-    const { data: row } = await admin
-      .from('impersonation_sessions')
-      .select('super_admin_user_id, target_project_id')
-      .eq('id', body.sessionId)
-      .maybeSingle();
-
-    await logSuperAdminAction({
-      actorUserId: (row?.super_admin_user_id as string) ?? user?.id ?? 'unknown',
-      action: 'impersonation.end',
-      targetProjectId: (row?.target_project_id as string | null) ?? null,
-      targetUserId: result.targetUserId,
-      metadata: { sessionId: body.sessionId, endedBy: user?.id ?? null },
-    });
-
-    return NextResponse.json({
-      ok: true,
-      superAdminSession: result.superAdminSession as unknown as Json,
-    });
+    // The marker is dead in every outcome: always clear it (path must match
+    // how it was set) so a stale banner can never get stuck.
+    const response = NextResponse.json({ ok: !!result, restored });
+    response.cookies.set(MARKER_COOKIE, '', { path: '/', maxAge: 0 });
+    return response;
   } catch (err) {
     Sentry.captureException(err);
     return NextResponse.json({ error: 'خطأ في الخادم' }, { status: 500 });
