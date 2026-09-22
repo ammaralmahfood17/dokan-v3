@@ -201,21 +201,28 @@ export function KitchenClient({
   const fullRefresh = useCallback(async () => {
     try {
       const supabase = createClient();
-      const { data } = await supabase
-        .from('orders')
-        .select('*, tables(number), order_items(*)')
-        .eq('project_id', projectId)
-        .in('status', ['pending', 'preparing', 'ready'])
-        .is('service_type', null)
-        .order('created_at', { ascending: true })
-        .limit(50);
+      // Paged loop (1000/page) — a plain limit(50) silently dropped the
+      // OLDEST active tickets (the ones a cook needs most) on a busy shift.
+      const PAGE = 1000;
+      const rows: OrderRow[] = [];
+      let from = 0;
+      for (;;) {
+        const { data } = await supabase
+          .from('orders')
+          .select('*, tables(number), order_items(*)')
+          .eq('project_id', projectId)
+          .in('status', ['pending', 'preparing', 'ready'])
+          .is('service_type', null)
+          .order('created_at', { ascending: true })
+          .range(from, from + PAGE - 1);
+        if (!data) return;
+        rows.push(...(data as unknown as OrderRow[]));
+        if (data.length < PAGE) break;
+        from += PAGE;
+      }
 
-      if (!data) return;
       // Oldest first (FIFO) — matches the server's initial query, so a poll
-      // snapshot never drops the OLDEST active tickets (the ones a cook
-      // needs most) when more than 50 orders are open. Newer orders beyond
-      // the cap still arrive via realtime INSERT.
-      const rows = data as unknown as OrderRow[];
+      // snapshot covers every open ticket, not just the first page.
 
       for (const o of rows) {
         if (!knownIds.current.has(o.id) && o.status === 'pending') {

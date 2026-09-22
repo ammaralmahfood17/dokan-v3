@@ -9,21 +9,34 @@ export default async function KitchenPage() {
   if (!ctx) redirect('/onboarding');
 
   const supabase = await createClient();
-  const { data: orders } = await supabase
-    .from('orders')
-    .select('*, tables(number), order_items(*)')
-    .eq('project_id', ctx.project.id)
-    .in('status', ['pending', 'preparing', 'ready'])
-    .is('service_type', null)
-    .order('created_at', { ascending: true })
-    .limit(50);
+
+  // Fetch ALL active tickets, paged (1000/page) — a plain limit(50) silently
+  // dropped the OLDEST tickets on a busy shift, exactly the ones the cook
+  // needs to see first. Matches the analytics collectOrders pattern.
+  const PAGE = 1000;
+  const allOrders: unknown[] = [];
+  let from = 0;
+  for (;;) {
+    const { data } = await supabase
+      .from('orders')
+      .select('*, tables(number), order_items(*)')
+      .eq('project_id', ctx.project.id)
+      .in('status', ['pending', 'preparing', 'ready'])
+      .is('service_type', null)
+      .order('created_at', { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (!data || data.length === 0) break;
+    allOrders.push(...data);
+    if (data.length < PAGE) break;
+    from += PAGE;
+  }
 
   return (
     <KitchenClient
       projectId={ctx.project.id}
       projectName={ctx.project.name}
       initialOrders={
-        (orders ?? []) as unknown as (Order & {
+        allOrders as (Order & {
           tables?: { number: number } | null;
           order_items?: OrderItem[];
         })[]
