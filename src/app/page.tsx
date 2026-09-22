@@ -115,6 +115,14 @@ export default function LandingPage() {
 
       <footer className="border-t border-[var(--color-border)] py-6 text-center text-xs text-[var(--color-text-muted)]">
         © {COPYRIGHT_YEAR} دكان — منصة طلبات للمؤسسات الصغيرة
+        <div className="mt-2 flex items-center justify-center gap-4">
+          <Link href="/terms" className="underline-offset-4 hover:underline">
+            الشروط والأحكام
+          </Link>
+          <Link href="/privacy" className="underline-offset-4 hover:underline">
+            سياسة الخصوصية
+          </Link>
+        </div>
       </footer>
     </div>
   );

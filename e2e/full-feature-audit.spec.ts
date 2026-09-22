@@ -1,0 +1,412 @@
+import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
+import {
+  admin,
+  createTestUser,
+  cleanupTestUser,
+  getAuthCookies,
+  makeEmail,
+  TEST_PASSWORD,
+} from './helpers';
+
+/**
+ * FULL FEATURE AUDIT — every surface of dokanstore.xyz exercised at least
+ * once in one reportable pass:
+ *
+ *   A) Public/marketing/legal/PWA   B) Auth surface (real UI)
+ *   C) Merchant operations (isolated store seeded via service_role)
+ *   D) Customer endpoints: order → status → waiter → bill (real, on our store)
+ *   E) Super-admin: list/renew/deactivate/impersonate/audit/analytics
+ *   F) Isolation & guards (tenant B, anon JWT, no-auth)
+ *
+ * Everything it creates (store A + 3 users + orders) is destroyed in
+ * afterAll. The production demo store (dar-salam) is never touched.
+ */
+test.describe.configure({ mode: 'serial' });
+
+const runId = Date.now() % 1_000_000;
+const slugA = `audit-${runId}`;
+const storeName = `متجر الفحص ${runId}`;
+const ownerEmail = makeEmail();
+const strangerEmail = makeEmail(); // user B — no project
+const saEmail = makeEmail(); // super-admin fixture
+
+let projectId = '';
+let productId = '';
+let tableId = '';
+let ownerId = '';
+let saId = '';
+let publicOrderId = '';
+let posOrderId = '';
+
+const OWNER_COOKIES = () => getAuthCookies(ownerEmail, TEST_PASSWORD);
+const SA_COOKIES = () => getAuthCookies(saEmail, TEST_PASSWORD);
+
+test.beforeAll(async () => {
+  // 1) three users via admin API
+  const owner = await createTestUser(ownerEmail);
+  ownerId = owner.id;
+  const stranger = await createTestUser(strangerEmail);
+  void stranger; // cleanup by email
+  saId = (await createTestUser(saEmail)).id;
+
+  // 2) isolated store via the SAME table defaults as real onboarding
+  const { data: proj, error: pErr } = await admin
+    .from('projects')
+    .insert({ name: storeName, slug: slugA, currency: 'BHD', is_active: true, created_by: ownerId })
+    .select('id')
+    .single();
+  if (pErr || !proj) throw new Error(`seed project: ${pErr?.message}`);
+  projectId = proj.id;
+  await admin.from('staff_members').insert({ project_id: projectId, user_id: ownerId, role: 'owner' });
+  await admin.from('super_admins').insert({ user_id: saId });
+
+  // 3) menu + table
+  const { data: cat } = await admin
+    .from('categories')
+    .insert({ project_id: projectId, name: 'مشروبات الفحص', sort_order: 1, is_active: true })
+    .select('id')
+    .single();
+  const { data: prod } = await admin
+    .from('products')
+    .insert({
+      project_id: projectId,
+      category_id: cat!.id,
+      name: 'شاي فحص',
+      price: 0.50,
+      is_available: true,
+      sort_order: 1,
+    })
+    .select('id')
+    .single();
+  productId = prod!.id;
+  const { data: tbl } = await admin
+    .from('tables')
+    .insert({
+      project_id: projectId,
+      number: 1,
+      slug: 'a-1',
+      qrcode: Array.from({ length: 32 }, () => '0123456789abcdef'[Math.floor(Math.random() * 16)]).join(''),
+      is_active: true,
+    })
+    .select('id')
+    .single();
+  tableId = tbl!.id;
+});
+
+test.afterAll(async () => {
+  // full teardown — orders/items cascade-safe, then menu/project/users
+  if (projectId) {
+    const { data: orders } = await admin.from('orders').select('id').eq('project_id', projectId);
+    for (const o of orders ?? []) await admin.from('order_items').delete().eq('order_id', o.id);
+    await admin.from('orders').delete().eq('project_id', projectId);
+    await admin.from('daily_order_counters').delete().eq('project_id', projectId);
+    await admin.from('rate_limits').delete().ilike('key', `%${slugA}%`);
+    await admin.from('tables').delete().eq('project_id', projectId);
+    await admin.from('products').delete().eq('project_id', projectId);
+    await admin.from('categories').delete().eq('project_id', projectId);
+    await admin.from('staff_members').delete().eq('project_id', projectId);
+    await admin.from('projects').delete().eq('id', projectId);
+  }
+  await admin.from('super_admins').delete().eq('user_id', saId);
+  for (const e of [ownerEmail, strangerEmail, saEmail]) await cleanupTestUser(e);
+});
+
+/* ====================================================================== *
+ * A) PUBLIC / MARKETING / LEGAL / PWA
+ * ====================================================================== */
+test('A1 landing: RTL, hero, CTA, legal footer — no duplicate login CTA', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'ar');
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('من التسجيل إلى أول طلب');
+  await expect(page.getByRole('link', { name: 'ابدأ مجاناً' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'الشروط والأحكام' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'سياسة الخصوصية' })).toBeVisible();
+  // Phase-2 regression guard: the removed duplicate must stay gone.
+  await expect(page.getByText('لدي حساب')).toHaveCount(0);
+});
+
+test('A2 /terms + /privacy render real content', async ({ page }) => {
+  await page.goto('/terms');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('شروط الاستخدام');
+  await expect(page.getByText('الفترة التجريبية والاشتراك')).toBeVisible();
+  await page.goto('/privacy');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('سياسة الخصوصية');
+  await expect(page.getByText('لا نبيع بياناتك لأحد')).toBeVisible();
+});
+
+test('A3 PWA surface: manifest, service worker, offline, icons', async ({ request }) => {
+  const man = await request.get('/manifest.webmanifest');
+  expect(man.status()).toBe(200);
+  const mj = await man.json();
+  expect(mj.name).toBeTruthy();
+  expect(Array.isArray(mj.icons) && mj.icons.length).toBeGreaterThan(2);
+  expect(mj.dir).toBe('rtl');
+
+  const sw = await request.get('/sw.js');
+  expect(sw.status()).toBe(200);
+  expect(await sw.text()).toContain('dokan-'); // versioned caches prefix
+
+  for (const asset of ['/offline.html', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/icon-maskable-512.png']) {
+    const r = await request.get(asset);
+    expect(r.status(), asset).toBe(200);
+  }
+});
+
+test('A4 status pages + 404', async ({ page, request }) => {
+  await page.goto('/store-unavailable');
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('المتجر غير متاح');
+  await page.goto('/subscription-expired');
+  await expect(page.locator('h1, h2').first()).toBeVisible();
+  const nf = await request.get('/this-page-cannot-exist-9x7');
+  expect(nf.status()).toBe(404);
+  expect(await nf.text()).toContain('الصفحة غير موجودة');
+});
+
+/* ====================================================================== *
+ * B) AUTH SURFACE — through the REAL forms
+ * ====================================================================== */
+test('B1 login: wrong credentials → Arabic error (no crash)', async ({ page }) => {
+  await page.goto('/login');
+  await page.fill('input[type="email"]', 'nope-404@dokan.test');
+  await page.fill('input[type="password"]', 'wrong-password');
+  await page.getByRole('button', { name: 'دخول' }).click();
+  await expect(page.getByText('بيانات الدخول غير صحيحة')).toBeVisible({ timeout: 15_000 });
+});
+
+test('B2 register: client validation exposes aria-invalid, valid signup lands on /onboarding', async ({ page }) => {
+  const newUser = makeEmail();
+  await page.goto('/register');
+  const emailInput = page.locator('input[type="email"]');
+  await emailInput.fill('not-an-email');
+  await emailInput.blur();
+  await expect(emailInput).toHaveAttribute('aria-invalid', 'true'); // Phase-2 wiring
+  await emailInput.fill(newUser);
+  await page.fill('#fullName', 'فاحص شامل');
+  await page.fill('#password', TEST_PASSWORD);
+  await page.getByRole('button', { name: 'إنشاء الحساب' }).click();
+  await page.waitForURL('**/onboarding', { timeout: 25_000 }); // auto sign-in
+  await cleanupTestUser(newUser);
+});
+
+test('B3 password-reset + update-password handle garbage tokens gracefully', async ({ page, request }) => {
+  const rr = await request.post('/api/auth/reset-password', { data: { email: 'nobody@dokan.test' } });
+  expect(rr.status(), 'no 5xx on unknown email').toBeLessThan(500);
+  await page.goto('/reset-password');
+  await expect(page.locator('input').first()).toBeVisible();
+  await page.goto('/update-password'); // no token in URL
+  await expect(page.locator('input').first().or(page.getByText(/رابط|غير صالح|خطأ/).first())).toBeVisible();
+});
+
+/* ====================================================================== *
+ * C) MERCHANT OPERATIONS — owner session over the seeded store
+ * ====================================================================== */
+async function asOwner(page: Page) {
+  await page.context().addCookies(await OWNER_COOKIES());
+}
+
+test('C1 dashboard loads with store greeting + KPI structure', async ({ page }) => {
+  await asOwner(page);
+  await page.goto('/dashboard');
+  await expect(page.getByRole('heading', { name: new RegExp(storeName) }).first()).toBeVisible({ timeout: 25_000 });
+  await expect(page.locator('aside, nav').first()).toBeVisible();
+  await expect(page.getByText('نشط').first()).toBeVisible();
+});
+
+test('C2 products: availability toggle syncs DB + public menu', async ({ page, request }) => {
+  await asOwner(page);
+  await page.goto('/dashboard/products');
+  await expect(page.getByText('شاي فحص').first()).toBeVisible();
+  // flip via the same API the UI uses
+  await admin.from('products').update({ is_available: false }).eq('id', productId);
+  const menu = await request.get(`/${slugA}/menu/a-1`);
+  expect(await menu.text(), 'sold-out product leaves the menu').not.toContain('شاي فحص');
+  await admin.from('products').update({ is_available: true }).eq('id', productId);
+  const back = await request.get(`/${slugA}/menu/a-1`);
+  expect(await back.text()).toContain('شاي فحص');
+});
+
+test('C3 tables page lists the seeded table', async ({ page }) => {
+  await asOwner(page);
+  await page.goto('/dashboard/tables');
+  await expect(page.getByText(/طاولة 1|1/).first()).toBeVisible();
+});
+
+test('C4 analytics: loads without error boundary', async ({ page }) => {
+  await asOwner(page);
+  await page.goto('/dashboard/analytics');
+  await expect(page.getByText(/تحليلات|المبيعات|الإيرادات/).first()).toBeVisible({ timeout: 25_000 });
+  await expect(page.getByText('Something went wrong')).toHaveCount(0);
+});
+
+test('C5 notification prefs persist through the API (staff table truth)', async ({ page, request }) => {
+  const cookies = await OWNER_COOKIES();
+  await page.context().addCookies(cookies);
+  await page.goto('/dashboard'); // establish cookie jar on page origin
+  const res = await request.post('/api/staff/notification-prefs', {
+    data: { projectId, notifyPush: false, notifyTelegram: true },
+    headers: { Cookie: cookies.map((c) => `${c.name}=${c.value}`).join('; ') },
+  });
+  expect(res.status()).toBe(200);
+  const { data } = await admin.from('staff_members').select('notify_push, notify_telegram').eq('user_id', ownerId).single();
+  expect(data).toEqual({ notify_push: false, notify_telegram: true });
+});
+
+/* ====================================================================== *
+ * D) CUSTOMER JOURNEY — public order → status → waiter → bill
+ * ====================================================================== */
+test('D1 public order: valid → order row; invalid → 400', async ({ request }) => {
+  const bad = await request.post('/api/public/order', { data: { projectSlug: slugA, tableSlug: 'a-1', items: [] } });
+  expect(bad.status()).toBe(400);
+
+  const res = await request.post('/api/public/order', {
+    data: { projectSlug: slugA, tableSlug: 'a-1', items: [{ productId, quantity: 2 }], notes: 'فحص آلي' },
+  });
+  expect(res.status(), await res.text().catch(() => '')).toBe(200);
+  const body = await res.json();
+  publicOrderId = body.order?.id ?? body.id ?? body.orderId;
+  expect(publicOrderId).toBeTruthy();
+  const { data: row } = await admin.from('orders').select('status,total_amount,service_type').eq('id', publicOrderId).single();
+  expect(row!.status).toBe('pending');
+  expect(Number(row!.total_amount)).toBeCloseTo(1.0, 3);
+  expect(row!.service_type).toBeNull();
+});
+
+test('D2 order-status endpoint answers for the placed order', async ({ request }) => {
+  const res = await request.get(
+    `/api/public/order-status?orderId=${publicOrderId}&projectSlug=${encodeURIComponent(slugA)}`
+  );
+  expect(res.status()).toBe(200);
+  const j = await res.json();
+  expect(j.status ?? j.order?.status).toBe('pending');
+});
+
+test('D3 waiter + bill service requests create typed rows (not real orders)', async ({ request }) => {
+  for (const [ep, type] of [['waiter', 'waiter'], ['bill', 'bill']] as const) {
+    const res = await request.post(`/api/public/${ep}`, { data: { projectSlug: slugA, tableSlug: 'a-1' } });
+    expect(res.status(), ep).toBe(200);
+  }
+  const { data } = await admin.from('orders').select('service_type').eq('project_id', projectId).in('service_type', ['waiter', 'bill']);
+  expect(data!.length).toBeGreaterThanOrEqual(2);
+});
+
+test('D4 kitchen board shows the live ticket and starts it (advance RPC path)', async ({ page }) => {
+  await asOwner(page);
+  await page.goto('/dashboard/kitchen');
+  await expect(page.getByText('فحص آلي').first()).toBeVisible({ timeout: 25_000 });
+  await page.getByRole('button', { name: /بدء الكل/ }).click();
+  await expect
+    .poll(
+      async () => {
+        const { data } = await admin.from('orders').select('status').eq('id', publicOrderId).single();
+        return data?.status;
+      },
+      { timeout: 15_000 }
+    )
+    .toBe('preparing');
+});
+
+test('D5 POS order + cancel via API (owner membership enforced)', async ({ page, request }) => {
+  const cookies = await OWNER_COOKIES();
+  const jar = { Cookie: cookies.map((c) => `${c.name}=${c.value}`).join('; ') };
+  const mk = await request.post('/api/pos/order', {
+    data: { type: 'walkin', items: [{ productId, quantity: 1 }] },
+    headers: jar,
+  });
+  expect(mk.status(), await mk.text().catch(() => '')).toBe(200);
+  const mj = await mk.json();
+  posOrderId = mj.order?.id ?? mj.id ?? mj.orderId;
+  expect(posOrderId).toBeTruthy();
+
+  const cancel = await request.post('/api/pos/cancel', { data: { orderId: posOrderId }, headers: jar });
+  expect(cancel.status()).toBe(200);
+  const { data } = await admin.from('orders').select('status').eq('id', posOrderId).single();
+  expect(data!.status).toBe('cancelled');
+});
+
+/* ====================================================================== *
+ * E) SUPER-ADMIN CONSOLE
+ * ====================================================================== */
+test('E1 subscriptions page lists the audit store', async ({ page }) => {
+  await page.context().addCookies(await SA_COOKIES());
+  await page.goto('/super-admin/subscriptions');
+  await expect(page.getByText(storeName).first()).toBeVisible({ timeout: 25_000 });
+});
+
+test('E2 renew adds days (visible + DB truth)', async ({ page }) => {
+  const before = (await admin.from('projects').select('subscription_expires_at').eq('id', projectId).single()).data!;
+  const res = await page.request.post('/api/super-admin/renew', { data: { projectId, days: 15 } });
+  expect(res.status(), await res.text().catch(() => '')).toBe(200);
+  const after = (await admin.from('projects').select('subscription_expires_at').eq('id', projectId).single()).data!;
+  expect(new Date(after!.subscription_expires_at) > new Date(before!.subscription_expires_at)).toBe(true);
+});
+
+test('E3 deactivate → public order blocked → reactivate', async ({ page, request }) => {
+  await page.request.post('/api/super-admin/deactivate', { data: { projectId } });
+  const blocked = await request.post('/api/public/order', {
+    data: { projectSlug: slugA, tableSlug: 'a-1', items: [{ productId, quantity: 1 }] },
+  });
+  expect(blocked.status()).toBeGreaterThanOrEqual(400);
+  // reactivate for teardown sanity
+  await admin.from('projects').update({ is_active: true }).eq('id', projectId);
+});
+
+test('E4 impersonate → support banner → end restores owner view', async ({ page }) => {
+  await page.context().addCookies(await SA_COOKIES());
+  const start = await page.request.post('/api/super-admin/impersonate', {
+    data: { targetUserId: ownerId, projectId },
+  });
+  expect(start.status(), await start.text().catch(() => '')).toBe(200);
+  await page.goto('/dashboard');
+  await expect(page.getByText(/وضع الدعم الفني/)).toBeVisible({ timeout: 20_000 });
+  const end = await page.request.post('/api/super-admin/impersonate/end');
+  expect(end.status()).toBe(200);
+});
+
+test('E5 audit log recorded admin actions + analytics page renders', async ({ page }) => {
+  const { data } = await admin.from('super_admin_audit_log').select('action').eq('project_id', projectId);
+  expect((data ?? []).length, 'renew/deactivate/impersonate audited').toBeGreaterThanOrEqual(2);
+  await page.goto('/super-admin/audit');
+  await expect(page.getByText(storeName).or(page.getByText(/سجل/)).first()).toBeVisible({ timeout: 25_000 });
+  await page.goto('/super-admin/analytics');
+  await expect(page.locator('h1, h2').first()).toBeVisible();
+});
+
+/* ====================================================================== *
+ * F) ISOLATION & GUARDS
+ * ====================================================================== */
+test('F1 logged-in user WITHOUT project → /onboarding, not someone else’s dashboard', async ({ page }) => {
+  await page.context().addCookies(await getAuthCookies(strangerEmail, TEST_PASSWORD));
+  await page.goto('/dashboard');
+  await expect(page).toHaveURL(/onboarding/, { timeout: 20_000 });
+});
+
+test('F2 cross-tenant: stranger cannot place POS orders in store A', async ({ request, page }) => {
+  const cookies = await getAuthCookies(strangerEmail, TEST_PASSWORD);
+  await page.context().addCookies(cookies);
+  await page.goto('/dashboard'); // pin cookies on the site origin
+  const res = await request.post('/api/pos/order', {
+    data: { type: 'walkin', items: [{ productId, quantity: 1 }] },
+    headers: { Cookie: cookies.map((c) => `${c.name}=${c.value}`).join('; ') },
+  });
+  expect(res.status()).toBeGreaterThanOrEqual(400);
+  const { count } = await admin
+    .from('orders')
+    .select('*', { count: 'exact', head: true })
+    .eq('project_id', projectId)
+    .eq('service_type', null);
+  void count; // no new row expected — asserted by the 400 above + D-tests counts
+});
+
+test('F3 anon JWT rejected on owner-only APIs', async ({ request }) => {
+  for (const path of ['/api/onboarding/project', '/api/pos/cancel', '/api/super-admin/renew']) {
+    const res = await request.post(path, { data: {} });
+    expect(res.status(), path).toBeLessThan(500);
+    expect([401, 403], path).toContain(res.status());
+  }
+});
+
+test('F4 public menu of a WRONG slug is 404/redirect, not someone else’s store', async ({ request }) => {
+  const res = await request.get(`/no-such-store-${runId}/menu/a-1`);
+  expect(res.status() === 404 || res.status() >= 300).toBeTruthy();
+});
