@@ -22,6 +22,9 @@ export function SuperAdminHeader() {
     setLoggingOut(true);
     const supabase = createClient();
     await supabase.auth.signOut();
+    // Same logout hygiene as the tenant sidebar: drop SW caches + unregister.
+    const { purgeServiceWorkerState } = await import('@/lib/sw-purge');
+    await purgeServiceWorkerState();
     router.push('/login');
     router.refresh();
   }

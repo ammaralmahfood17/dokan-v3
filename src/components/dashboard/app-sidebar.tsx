@@ -61,6 +61,11 @@ export function AppSidebar({
       const { createClient } = await import('@/lib/supabase/client');
       const supabase = createClient();
       await supabase.auth.signOut();
+      // Purge SW-cached pages/RSC so the next user of this device never gets
+      // the previous session's data served from cache (iOS PWA has no
+      // user-scoped storage isolation).
+      const { purgeServiceWorkerState } = await import('@/lib/sw-purge');
+      await purgeServiceWorkerState();
       router.push('/login');
       router.refresh();
     } catch {
