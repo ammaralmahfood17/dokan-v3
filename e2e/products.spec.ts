@@ -126,5 +126,28 @@ test('products: category → product w/ addon → edit → toggle → delete', a
   await expect
     .poll(async () => (await dbProduct())?.is_available, { timeout: 15_000 })
     .toBe(false);
+
+  // ── 5. Delete via edit-form «حذف» → confirmation modal (FIX-DEL-001;
+  //    this flow was a silent no-op until the confirm modal was restored) ──
+  await page.getByLabel(`تعديل ${created!.name}`).click();
+  await expect(page.getByRole('dialog', { name: 'تعديل منتج' })).toBeVisible({ timeout: 15_000 });
+  await page
+    .getByRole('dialog', { name: 'تعديل منتج' })
+    .getByRole('button', { name: 'حذف', exact: true })
+    .click();
+  const confirmDialog = page.getByRole('dialog', { name: 'حذف المنتج' });
+  await expect(confirmDialog).toBeVisible({ timeout: 15_000 });
+  await confirmDialog.getByRole('button', { name: 'نعم، احذف' }).click();
+  await expect(confirmDialog).toBeHidden({ timeout: 15_000 });
+
+  // DB: row gone
+  await expect
+    .poll(
+      async () => (await admin.from('products').select('id').eq('id', productId).maybeSingle()).data,
+      { timeout: 15_000 }
+    )
+    .toBeNull();
+  // UI: card gone
+  await expect(page.getByLabel(`تعديل ${created!.name}`)).toBeHidden({ timeout: 15_000 });
   console.log('✅ PRODUCTS CRUD OK — id', productId);
 });
