@@ -49,9 +49,12 @@ export function CategoryManager({
         <Modal title="تصنيف جديد" onClose={onCloseCreate}>
           <form onSubmit={saveCategory} className="space-y-4">
             <div className="field">
-              <label className="label">اسم التصنيف</label>
+              <label className="label" htmlFor="cat-name-new">اسم التصنيف</label>
               <input
+                id="cat-name-new"
                 className={`input ${catError ? 'input-error' : ''}`}
+                aria-invalid={!!catError}
+                aria-describedby={catError ? 'cat-name-new-error' : undefined}
                 required
                 maxLength={50}
                 value={catName}
@@ -65,7 +68,7 @@ export function CategoryManager({
                 placeholder="مثال: مشروبات ساخنة"
                 autoFocus
               />
-              {catError && <p className="error-text">{catError}</p>}
+              {catError && <p id="cat-name-new-error" className="error-text" role="alert">{catError}</p>}
             </div>
             <div className="flex gap-2">
               <Button type="submit" block disabled={loading || !catName.trim()}>

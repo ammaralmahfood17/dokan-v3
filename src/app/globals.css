@@ -49,10 +49,10 @@
   /* FIX-D-006: رفع تباين text-muted من 2.45:1 إلى 7.6:1 (WCAG AA Pass) */
   --color-text-muted: #64748B; /* كان #94A3B8 */
   --color-text-disabled: #CBD5E1;
-  --color-text-tertiary: #9A9D96; /* v1.1 Calm Surface: tertiary */
+  --color-text-tertiary: #6B6F68; /* a11y: 2.75→5.12:1 on white (WCAG AA) */
 
   /* Semantic — desaturated, no "game" colors */
-  --color-success: #059669;
+  --color-success: #047857; /* a11y: 3.58→5.36:1 on success-tint; 5.48:1 vs white text */
   --color-success-tint: #ECFDF5;
   --color-success-hover: #047857;
   --color-warn: #B45309; /* v1.1 Calm Surface */
@@ -61,7 +61,7 @@
   --color-danger: #B91C1C; /* v1.1 Calm Surface */
   --color-danger-tint: #FEECEC; /* v1.1 Calm Surface */
   --color-danger-hover: #B91C1C;
-  --color-info: #0284C7;
+  --color-info: #0369A1; /* a11y: 3.84→5.64:1 on info-tint; 5.93:1 on white */
   --color-info-tint: #F0F9FF;
 
   /* Typography — Cairo ONLY (no secondary faces, no display face) */

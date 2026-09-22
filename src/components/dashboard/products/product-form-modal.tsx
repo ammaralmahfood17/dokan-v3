@@ -328,9 +328,12 @@ export function ProductFormModal({
         {/* NAME + NAME EN (2-col) */}
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="field">
-            <label className="label">الاسم بالعربي</label>
+            <label className="label" htmlFor="product-name">الاسم بالعربي</label>
             <input
+              id="product-name"
               className={`input ${fieldErrors.name ? 'input-error' : ''}`}
+              aria-invalid={!!fieldErrors.name}
+              aria-describedby={fieldErrors.name ? 'product-name-error' : undefined}
               required
               maxLength={100}
               value={name}
@@ -344,7 +347,7 @@ export function ProductFormModal({
               }}
               placeholder="مثال: قهوة عربية"
             />
-            {fieldErrors.name && <p className="error-text">{fieldErrors.name}</p>}
+            {fieldErrors.name && <p id="product-name-error" className="error-text" role="alert">{fieldErrors.name}</p>}
           </div>
           <div className="field">
             <label className="label">بالإنجليزي</label>
@@ -375,12 +378,15 @@ export function ProductFormModal({
         {/* PRICE + CATEGORY (2-col) */}
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="field">
-            <label className="label">
+            <label className="label" htmlFor="product-price">
               السعر <span className="text-[var(--color-text-muted)]">({currency})</span>
             </label>
             <div className="relative">
               <input
+                id="product-price"
                 className={`input ${fieldErrors.price ? 'input-error' : ''}`}
+                aria-invalid={!!fieldErrors.price}
+                aria-describedby={fieldErrors.price ? 'product-price-error' : undefined}
                 type="number"
                 inputMode="decimal"
                 step="0.001"
@@ -399,7 +405,7 @@ export function ProductFormModal({
                 placeholder={`0.${'0'.repeat(currencyDecimals(currency))}`}
               />
             </div>
-            {fieldErrors.price && <p className="error-text">{fieldErrors.price}</p>}
+            {fieldErrors.price && <p id="product-price-error" className="error-text" role="alert">{fieldErrors.price}</p>}
           </div>
 
           {/* Category select with inline quick-add */}

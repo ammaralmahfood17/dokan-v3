@@ -160,6 +160,8 @@ export function SettingsClient({
           <input
             id="store-name"
             className={`input ${errors.name ? 'input-error' : ''}`}
+            aria-invalid={!!errors.name}
+            aria-describedby={errors.name ? 'store-name-error' : undefined}
             required
             maxLength={80}
             value={name}
@@ -172,7 +174,7 @@ export function SettingsClient({
               if (err.name) setErrors((prev) => ({ ...prev, name: err.name }));
             }}
           />
-          {errors.name && <p className="error-text">{errors.name}</p>}
+          {errors.name && <p id="store-name-error" className="error-text" role="alert">{errors.name}</p>}
         </div>
 
         <div className="field">
@@ -211,15 +213,19 @@ export function SettingsClient({
               className="h-10 w-12 cursor-pointer rounded border border-[var(--color-border)]"
             />
             <input
+              id="store-color-hex"
+              aria-label="رمز اللون (HEX)"
               className={`input flex-1 ${errors.color ? 'input-error' : ''}`}
               dir="ltr"
+              aria-invalid={!!errors.color}
+              aria-describedby={errors.color ? 'store-color-error' : undefined}
               value={primaryColor}
               maxLength={7}
               onChange={(e) => setPrimaryColor(e.target.value)}
               pattern="^#[0-9A-Fa-f]{6}$"
             />
           </div>
-          {errors.color && <p className="error-text">{errors.color}</p>}
+          {errors.color && <p id="store-color-error" className="error-text" role="alert">{errors.color}</p>}
         </div>
 
         <div className="mb-4 flex items-center justify-between gap-3">

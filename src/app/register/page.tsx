@@ -111,8 +111,10 @@ export default function RegisterPage() {
               onChange={(e) => setEmail(e.target.value)}
               onBlur={() => setTouched((t) => ({ ...t, email: true }))}
               dir="ltr"
+              aria-invalid={!!emailErr}
+              aria-describedby={emailErr ? 'email-error' : undefined}
             />
-            {emailErr && <p className="error-text">{emailErr}</p>}
+            {emailErr && <p id="email-error" className="error-text" role="alert">{emailErr}</p>}
           </div>
           <div className="field">
             <label className="label" htmlFor="password">
@@ -131,9 +133,11 @@ export default function RegisterPage() {
               onChange={(e) => setPassword(e.target.value)}
               onBlur={() => setTouched((t) => ({ ...t, password: true }))}
               dir="ltr"
+              aria-invalid={!!passErr}
+              aria-describedby={passErr ? 'password-error' : 'password-hint'}
             />
-            {passErr && <p className="error-text">{passErr}</p>}
-            {!passErr && <p className="hint">6 أحرف على الأقل</p>}
+            {passErr && <p id="password-error" className="error-text" role="alert">{passErr}</p>}
+            {!passErr && <p id="password-hint" className="hint">6 أحرف على الأقل</p>}
           </div>
           {error && <p className="error-text mb-3">{error}</p>}
           <Button type="submit" block disabled={loading || !!emailErr || !!passErr}>

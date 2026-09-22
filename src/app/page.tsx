@@ -87,9 +87,9 @@ export default function LandingPage() {
             <Link href="/register" className="btn btn-primary btn-lg">
               إنشاء حساب
             </Link>
-            <Link href="/login" className="btn btn-secondary btn-lg">
-              لدي حساب
-            </Link>
+            {/* a11y/UX audit 2.3: removed the hero's «لدي حساب» duplicate —
+                it pointed to /login, the same target as the header's «دخول»,
+                and split the primary CTA's attention on first screen. */}
           </div>
         </section>
 
