@@ -121,6 +121,9 @@ export async function POST(request: NextRequest) {
             });
           } catch (auditErr) {
             console.warn('[Audit] Failed to write order audit log', auditErr);
+            // 1.9: an audit write failure is a compliance-relevant silent
+            // failure — alert (Sentry no-ops without a DSN, never throws).
+            Sentry.captureException(auditErr);
           }
         })(),
 

@@ -34,7 +34,11 @@ export async function POST(request: Request) {
       METRIC_NAMES.has(String(parsed.name))
     ) {
       const path = typeof parsed.path === 'string' ? parsed.path.slice(0, 80) : '/';
-      console.log(`web-vitals ${parsed.name} ${parsed.value}ms path=${path}`);
+      // 1.11: dev-only — this route is a hot beacon endpoint; logging every
+      // metric per-request in production is pure noise (1.5x traffic volume).
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`web-vitals ${parsed.name} ${parsed.value}ms path=${path}`);
+      }
     }
   } catch {
     // never block the page on a metrics beacon

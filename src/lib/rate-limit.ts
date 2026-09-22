@@ -18,6 +18,10 @@ type RateLimitRecord = {
 
 const store = new Map<string, RateLimitRecord>();
 
+// 1.9: one-shot prod alert for in-memory fallback (per serverless instance —
+// deliberate: one warning per cold start is the useful signal, not per hit).
+let fellBackToInMemoryAlerted = false;
+
 interface RateLimitOptions {
   limit: number;      // max requests
   windowMs: number;   // time window in ms
@@ -125,6 +129,19 @@ export async function rateLimit(
   if (supabaseResult) return supabaseResult;
 
   // 3. Fallback: in-memory Map (local dev only)
+  if (
+    process.env.VERCEL_ENV === 'production' &&
+    !fellBackToInMemoryAlerted
+  ) {
+    // A silently weakened (per-instance) rate limiter in prod is itself a
+    // security regression — alert once per instance instead of swallowing.
+    fellBackToInMemoryAlerted = true;
+    import('@sentry/nextjs')
+      .then((Sentry) =>
+        Sentry.captureMessage('Rate limiter fell back to in-memory', 'warning')
+      )
+      .catch(() => {});
+  }
   const now = Date.now();
   const record = store.get(key);
 
