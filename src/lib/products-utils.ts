@@ -63,3 +63,19 @@ export async function compressImage(file: File): Promise<File> {
     type: 'image/webp',
   });
 }
+
+/**
+ * M5: after any product/category mutation, purge the public menu cache for
+ * this project so the live QR menu reflects the change immediately instead of
+ * after the 60s ISR window. Fire-and-forget — cache purge must never block or
+ * fail the user's action. The endpoint re-checks membership server-side.
+ * FIX-C-003 (audit 2.4): moved verbatim from products-client.tsx — now needed
+ * by the extracted bulk/category hooks as well as the parent.
+ */
+export function revalidateMenuCache(projectId: string) {
+  void fetch('/api/revalidate-menu', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ projectId }),
+  }).catch(() => {});
+}

@@ -1,8 +1,7 @@
 'use client';
 
-import { FormEvent, useCallback, useDeferredValue, useMemo, useRef, useState } from 'react';
-import Image from 'next/image';
-import { Plus, Pencil, Trash2, X, ImageIcon, Check, Search } from 'lucide-react';
+import { useCallback, useDeferredValue, useMemo, useRef, useState } from 'react';
+import { Plus, Trash2, Check } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { formatMoney, money, currencyDecimals } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -15,8 +14,6 @@ import type { Database } from '@/lib/database.types';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 
-type ProductWithAddons = Product & { product_addons: ProductAddon[] };
-
 /**
  * M5: after any product/category mutation, purge the public menu cache for
  * this project so the live QR menu reflects the change immediately instead of
@@ -24,21 +21,20 @@ type ProductWithAddons = Product & { product_addons: ProductAddon[] };
  * fail the user's action. The endpoint re-checks membership server-side.
  */
 // FIX-C-001: helpers مستخرجة (validate/remove/compress)
-import { validateProduct, removeProductImage, compressImage, type FieldErrors } from '@/lib/products-utils';
+// FIX-C-003 (audit 2.4): revalidateMenuCache انتقلت لنفس الملف (تحتاجها
+// المكونات/الخطافات المستخرجة الآن) — نقل حرفي بدون تغيير سلوك
+import { validateProduct, removeProductImage, compressImage, revalidateMenuCache, type FieldErrors } from '@/lib/products-utils';
 // FIX-C-001: مكوّن رفع الصور مستخرج
 import { ImageUploader } from '@/components/dashboard/products/image-uploader';
 // FIX-C-001: نموذج المنتج مستخرج
 import { ProductFormModal } from '@/components/dashboard/products/product-form-modal';
 // FIX-C-001: modals التصنيفات مستخرجة
 import { CategoryManager } from '@/components/dashboard/products/category-manager';
-
-function revalidateMenuCache(projectId: string) {
-  void fetch('/api/revalidate-menu', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ projectId }),
-  }).catch(() => {});
-}
+// FIX-C-003 (audit 2.4): البطاقة + شريط الفلترة + خطافا.bulk والتصنيفات مستخرجة — نقل حرفي
+import { ProductCard, type ProductWithAddons } from '@/components/dashboard/products/product-card';
+import { CategoryFilterBar } from '@/components/dashboard/products/category-filter-bar';
+import { useProductBulk } from '@/components/dashboard/products/use-product-bulk';
+import { useCategoryCrud } from '@/components/dashboard/products/use-category-crud';
 
 /** Temporary addon line in the product form — id is set for existing (persisted) addons */
 type FormAddon = { key: string; id?: string; name: string; price: string };
@@ -59,19 +55,7 @@ export function ProductsClient({
   const [categories, setCategories] = useState(initialCategories);
   const [products, setProducts] = useState(initialProducts);
   const [showProductForm, setShowProductForm] = useState(false);
-  const [showCategoryForm, setShowCategoryForm] = useState(false);
   const [editing, setEditing] = useState<ProductWithAddons | null>(null);
-  const [loading, setLoading] = useState(false);
-
-
-  // Category form
-  const [catName, setCatName] = useState('');
-  const [catError, setCatError] = useState('');
-
-  // Edit category
-  const [editingCat, setEditingCat] = useState<Category | null>(null);
-  const [editCatName, setEditCatName] = useState('');
-  const [confirmDeleteCat, setConfirmDeleteCat] = useState<Category | null>(null);
 
   // Search + category filter
   const [searchQuery, setSearchQuery] = useState('');
@@ -114,14 +98,6 @@ export function ProductsClient({
     // FIX-C-001: النموذج يهيئ حالته من editing (null = جديد)
     setEditing(null);
     setShowProductForm(true);
-  }
-
-  // Fresh category form every time — never leak the previous draft or error
-  // into a newly opened modal (cancel/X/backdrop close without resetting).
-  function openCategoryForm() {
-    setCatName('');
-    setCatError('');
-    setShowCategoryForm(true);
   }
 
   function openEdit(p: ProductWithAddons) {
@@ -174,161 +150,11 @@ export function ProductsClient({
     );
   }
 
-  const [bulkMode, setBulkMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [bulkBusy, setBulkBusy] = useState(false);
-  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  // FIX-C-003 (audit 2.4): CRUD التصنيفات مستخرج كما هو (يغذّي CategoryManager)
+  const categoryCrud = useCategoryCrud({ projectId, categories, setCategories });
 
-  function exitBulk() {
-    setBulkMode(false);
-    setSelectedIds(new Set());
-  }
-
-  function toggleSelect(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  const visibleIds = filteredProducts.map((p) => p.id);
-  const allVisibleSelected =
-    visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
-
-  function toggleSelectAllVisible() {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (allVisibleSelected) {
-        for (const id of visibleIds) next.delete(id);
-      } else {
-        for (const id of visibleIds) next.add(id);
-      }
-      return next;
-    });
-  }
-
-  async function bulkSetAvailability(available: boolean) {
-    if (selectedIds.size === 0) return;
-    setBulkBusy(true);
-    try {
-      const supabase = createClient();
-      const { error } = await supabase
-        .from('products')
-        .update({ is_available: available })
-        .in('id', [...selectedIds])
-        .eq('project_id', projectId);
-      if (error) {
-        toast.error('فشل التحديث');
-        return;
-      }
-      setProducts((prev) =>
-        prev.map((p) =>
-          selectedIds.has(p.id) ? { ...p, is_available: available } : p
-        )
-      );
-      toast.success(available ? 'تم تفعيل المنتجات' : 'تم إيقاف المنتجات');
-      exitBulk();
-      revalidateMenuCache(projectId);
-    } finally {
-      setBulkBusy(false);
-    }
-  }
-
-  async function bulkDelete() {
-    if (selectedIds.size === 0) return;
-    setBulkBusy(true);
-    try {
-      const supabase = createClient();
-      const { error } = await supabase
-        .from('products')
-        .delete()
-        .in('id', [...selectedIds])
-        .eq('project_id', projectId);
-      setConfirmBulkDelete(false);
-      if (error) {
-        toast.error('فشل الحذف');
-        return;
-      }
-      setProducts((prev) => prev.filter((p) => !selectedIds.has(p.id)));
-      toast.success('تم حذف المنتجات');
-      exitBulk();
-      revalidateMenuCache(projectId);
-    } finally {
-      setBulkBusy(false);
-    }
-  }
-
-  async function saveCategory(e: FormEvent) {
-    e.preventDefault();
-    if (!catName.trim()) {
-      setCatError('اسم التصنيف مطلوب');
-      return;
-    }
-    setCatError('');
-    setLoading(true);
-    try {
-      const supabase = createClient();
-      const { data, error } = await supabase
-        .from('categories')
-        .insert({
-          project_id: projectId,
-          name: catName.trim(),
-          sort_order: categories.length,
-        })
-        .select('*')
-        .single();
-      if (error || !data) {
-        toast.error('فشل إنشاء التصنيف');
-        return;
-      }
-    setCategories((prev) => [...prev, data as Category]);
-    setCatName('');
-    setShowCategoryForm(false);
-    toast.success('تم إنشاء التصنيف');
-    revalidateMenuCache(projectId);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function updateCategory() {
-    const name = editCatName.trim();
-    if (!name || !editingCat) return;
-    setLoading(true);
-    try {
-      const supabase = createClient();
-      const { error } = await supabase
-        .from('categories')
-        .update({ name })
-        .eq('id', editingCat.id)
-        .eq('project_id', projectId);
-      if (error) { toast.error('فشل التحديث'); return; }
-      setCategories((prev) => prev.map((c) => c.id === editingCat.id ? { ...c, name } : c));
-      setEditingCat(null);
-      toast.success('تم تحديث التصنيف');
-      revalidateMenuCache(projectId);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function deleteCategory() {
-    if (!confirmDeleteCat) return;
-    setLoading(true);
-    try {
-      const supabase = createClient();
-      const { error } = await supabase.from('categories').delete().eq('id', confirmDeleteCat.id).eq('project_id', projectId);
-      if (error) { toast.error('فشل الحذف — تأكد من عدم وجود منتجات مرتبطة'); return; }
-      setCategories((prev) => prev.filter((c) => c.id !== confirmDeleteCat.id));
-      toast.success('تم حذف التصنيف');
-      revalidateMenuCache(projectId);
-    } finally {
-      setLoading(false);
-    }
-  }
-
+  // FIX-C-003 (audit 2.4): التحديد الجماعي مستخرج كما هو
+  const bulk = useProductBulk({ projectId, visibleProducts: filteredProducts, setProducts });
 
   const refresh = useCallback(async () => { router.refresh(); }, [router]);
 
@@ -341,9 +167,9 @@ export function ProductsClient({
           <p>إدارة التصنيفات والمنتجات والإضافات</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {bulkMode ? (
+          {bulk.bulkMode ? (
             <>
-              <Button variant="secondary" size="sm" onClick={exitBulk}>
+              <Button variant="secondary" size="sm" onClick={bulk.exitBulk}>
                 إلغاء التحديد
               </Button>
               <Button size="sm" onClick={openCreate}>
@@ -353,10 +179,10 @@ export function ProductsClient({
             </>
           ) : (
             <>
-              <Button variant="secondary" size="sm" onClick={() => setBulkMode(true)}>
+              <Button variant="secondary" size="sm" onClick={() => bulk.setBulkMode(true)}>
                 تحديد
               </Button>
-              <Button variant="secondary" size="sm" onClick={openCategoryForm}>
+              <Button variant="secondary" size="sm" onClick={categoryCrud.openCategoryForm}>
                 تصنيف جديد
               </Button>
               <Button size="sm" onClick={openCreate}>
@@ -368,95 +194,18 @@ export function ProductsClient({
         </div>
       </div>
 
-      {/* Search bar */}
-      <div className="relative mb-4">
-        <Search className="pointer-events-none absolute start-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]" />
-        <input
-          className="input ps-10 pe-12"
-          placeholder="ابحث عن منتج…"
-          maxLength={100}
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-        />
-        {searchQuery && (
-          <button
-            type="button"
-            onClick={() => setSearchQuery('')}
-            className="absolute end-2 top-1/2 -translate-y-1/2 btn btn-ghost btn-sm"
-            aria-label="مسح البحث"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        )}
-      </div>
-
-      {categories.length > 0 && (
-        <div className="mb-4 flex flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setActiveCat(null)}
-            aria-pressed={!activeCat}
-            className={`flex min-h-[44px] items-center gap-1.5 rounded-full px-4 text-xs font-bold transition-all ${
-              !activeCat
-                ? 'bg-[var(--color-primary)] text-white'
-                : 'border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:border-[var(--color-primary)]'
-            }`}
-          >
-            <span>الكل</span>
-            <span
-              className={`rounded-full px-1.5 py-0.5 text-[10px] tabular-nums ${
-                !activeCat ? 'bg-white/20' : 'bg-[var(--color-bg)]'
-              }`}
-            >
-              {sortedProducts.length}
-            </span>
-          </button>
-          {categories.map((c) => (
-            <div
-              key={c.id}
-              className={`flex min-h-[44px] items-center gap-0.5 rounded-full py-1 pe-1 ps-3 text-xs font-bold transition-all ${
-                activeCat === c.id
-                  ? 'bg-[var(--color-primary)] text-white'
-                  : 'border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)]'
-              }`}
-            >
-              <button
-                type="button"
-                onClick={() => setActiveCat(activeCat === c.id ? null : c.id)}
-                aria-pressed={activeCat === c.id}
-                className="flex items-center gap-1.5 rounded-full py-1.5"
-              >
-                {c.name}
-                <span
-                  className={`rounded-full px-1.5 py-0.5 text-[10px] tabular-nums ${
-                    activeCat === c.id ? 'bg-white/20' : 'bg-[var(--color-bg)]'
-                  }`}
-                >
-                  {categoryCounts.get(c.id) ?? 0}
-                </span>
-              </button>
-              {/* Edit/delete — real buttons, always visible (touch + keyboard) */}
-              <span className="mx-0.5 h-4 w-px bg-[var(--color-border)]" aria-hidden="true" />
-              <button
-                type="button"
-                onClick={() => { setEditingCat(c); setEditCatName(c.name); }}
-                aria-label={`تعديل التصنيف ${c.name}`}
-                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full transition-opacity hover:opacity-70"
-              >
-                <Pencil className="h-3 w-3" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirmDeleteCat(c)}
-                aria-label={`حذف التصنيف ${c.name}`}
-                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full transition-opacity hover:opacity-70"
-              >
-                <Trash2 className="h-3 w-3 text-[var(--color-danger)]" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Search + category chips — FIX-C-003: شريط الفلترة مستخرج */}
+      <CategoryFilterBar
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        activeCat={activeCat}
+        onPickCat={setActiveCat}
+        categories={categories}
+        totalCount={sortedProducts.length}
+        counts={categoryCounts}
+        onEditCategory={(c) => { categoryCrud.setEditingCat(c); categoryCrud.setEditCatName(c.name); }}
+        onDeleteCategory={(c) => categoryCrud.setConfirmDeleteCat(c)}
+      />
 
       {!filteredProducts.length ? (
         <EmptyState
@@ -474,139 +223,58 @@ export function ProductsClient({
           {/* FIX-P-003: containment لعزل الشبكة الثقيلة */}
           <div className="product-grid grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
             {filteredProducts.map((p) => (
-              <div
+              <ProductCard
                 key={p.id}
-                role={bulkMode ? undefined : 'button'}
-                tabIndex={bulkMode ? undefined : 0}
-                onClick={bulkMode ? undefined : () => openEdit(p)}
-                onKeyDown={
-                  bulkMode
-                    ? undefined
-                    : (e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          openEdit(p);
-                        }
-                      }
-                }
-                aria-label={bulkMode ? undefined : `تعديل ${p.name}`}
-                className={`dashboard-card card overflow-hidden text-start transition-all active:scale-[0.98] ${
-                  bulkMode && selectedIds.has(p.id) ? 'ring-2 ring-[var(--color-primary)]' : ''
-                } ${!p.is_available ? 'opacity-60' : ''}`}
-              >
-                {/* Image / placeholder — 4:3 like the POS grid. surface so no-image
-                    cards read as one clean card instead of bleeding into the page bg */}
-                <div className="relative aspect-[4/3] w-full overflow-hidden bg-[var(--color-surface)]">
-                  {p.image_url ? (
-                    <Image
-                      src={p.image_url}
-                      alt={p.name}
-                      fill
-                      sizes="(max-width: 768px) 50vw, 200px"
-                      className={`object-cover ${
-                        !p.is_available ? 'grayscale' : ''
-                      }`}
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-[var(--color-text-muted)]">
-                      <ImageIcon className="h-7 w-7" />
-                    </div>
-                  )}
-                  {bulkMode ? (
-                    <button
-                      type="button"
-                      onClick={() => toggleSelect(p.id)}
-                      aria-label={`اختيار ${p.name}`}
-                      className={`absolute start-2 top-2 flex h-11 w-11 items-center justify-center rounded-full border-2 bg-[var(--color-surface)] transition-colors ${
-                        selectedIds.has(p.id)
-                          ? 'border-[var(--color-primary)] bg-[var(--color-primary)] text-white'
-                          : 'border-[var(--color-border)] text-transparent'
-                      }`}
-                    >
-                      <Check className="h-5 w-5" />
-                    </button>
-                  ) : (
-                    !p.is_available && (
-                      <span className="absolute end-2 top-2 rounded-[4px] bg-[var(--color-danger)] px-2 py-0.5 text-[10px] font-bold text-[var(--color-surface)]">
-                        متوقف
-                      </span>
-                    )
-                  )}
-                </div>
-
-                <div className="p-3">
-                  <h3 className="line-clamp-1 text-sm font-bold">{p.name}</h3>
-                  {p.description && (
-                    <p className="mt-0.5 line-clamp-1 text-[11px] text-[var(--color-text-secondary)]">
-                      {p.description}
-                    </p>
-                  )}
-                  <p className="mt-1 text-sm font-bold tabular-nums text-[var(--color-text)]">
-                    {formatMoney(Number(p.price), currency)}
-                  </p>
-
-                  {p.product_addons?.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {p.product_addons.slice(0, 2).map((a) => (
-                        <span
-                          key={a.id}
-                          className="rounded-full bg-[var(--color-bg)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-text-secondary)]"
-                        >
-                          {a.name}
-                        </span>
-                      ))}
-                      {p.product_addons.length > 2 && (
-                        <span className="rounded-full bg-[var(--color-bg)] px-2 py-0.5 text-[10px] font-bold tabular-nums text-[var(--color-primary)]">
-                          +{p.product_addons.length - 2}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
+                product={p}
+                currency={currency}
+                bulkMode={bulk.bulkMode}
+                selected={bulk.selectedIds.has(p.id)}
+                onOpen={() => openEdit(p)}
+                onToggleSelect={() => bulk.toggleSelect(p.id)}
+              />
             ))}
           </div>
 
           {/* Bulk action bar */}
-          {bulkMode && (
+          {bulk.bulkMode && (
             <div className="sticky bottom-3 z-[var(--z-sticky)] mt-4 flex items-center justify-between gap-2 rounded-[10px] border border-[var(--color-border)] bg-[var(--color-surface)] p-2 shadow-float">
               <button
                 type="button"
-                onClick={toggleSelectAllVisible}
+                onClick={bulk.toggleSelectAllVisible}
                 className="flex min-h-[44px] items-center gap-2 rounded-[var(--radius-md)] px-3 text-sm font-semibold text-[var(--color-text-secondary)]"
               >
                 <span
                   className={`flex h-5 w-5 items-center justify-center rounded border-2 ${
-                    allVisibleSelected
+                    bulk.allVisibleSelected
                       ? 'border-[var(--color-primary)] bg-[var(--color-primary)] text-white'
                       : 'border-[var(--color-border)]'
                   }`}
                 >
-                  {allVisibleSelected && <Check className="h-3 w-3" />}
+                  {bulk.allVisibleSelected && <Check className="h-3 w-3" />}
                 </span>
-                {allVisibleSelected ? 'إلغاء الكل' : 'اختيار الكل'}
+                {bulk.allVisibleSelected ? 'إلغاء الكل' : 'اختيار الكل'}
               </button>
               <div className="flex gap-1">
                 <button
                   type="button"
-                  onClick={() => bulkSetAvailability(true)}
-                  disabled={bulkBusy || selectedIds.size === 0}
+                  onClick={() => bulk.bulkSetAvailability(true)}
+                  disabled={bulk.bulkBusy || bulk.selectedIds.size === 0}
                   className="btn btn-secondary btn-sm"
                 >
                   تفعيل
                 </button>
                 <button
                   type="button"
-                  onClick={() => bulkSetAvailability(false)}
-                  disabled={bulkBusy || selectedIds.size === 0}
+                  onClick={() => bulk.bulkSetAvailability(false)}
+                  disabled={bulk.bulkBusy || bulk.selectedIds.size === 0}
                   className="btn btn-secondary btn-sm"
                 >
                   إيقاف
                 </button>
                 <button
                   type="button"
-                  onClick={() => setConfirmBulkDelete(true)}
-                  disabled={bulkBusy || selectedIds.size === 0}
+                  onClick={() => bulk.setConfirmBulkDelete(true)}
+                  disabled={bulk.bulkBusy || bulk.selectedIds.size === 0}
                   className="btn btn-danger btn-sm"
                 >
                   حذف
@@ -645,26 +313,26 @@ export function ProductsClient({
 
       {/* ======== CATEGORY MODALS — FIX-C-001: extracted component ======== */}
       <CategoryManager
-        showCategoryForm={showCategoryForm}
-        catName={catName}
-        setCatName={setCatName}
-        catError={catError}
-        setCatError={setCatError}
-        saveCategory={saveCategory}
-        loading={loading}
-        onCloseCreate={() => setShowCategoryForm(false)}
-        editingCat={editingCat}
-        editCatName={editCatName}
-        setEditCatName={setEditCatName}
-        updateCategory={updateCategory}
-        onCloseEdit={() => setEditingCat(null)}
-        confirmDeleteCat={confirmDeleteCat}
-        deleteCategory={deleteCategory}
-        onCloseDelete={() => setConfirmDeleteCat(null)}
+        showCategoryForm={categoryCrud.showCategoryForm}
+        catName={categoryCrud.catName}
+        setCatName={categoryCrud.setCatName}
+        catError={categoryCrud.catError}
+        setCatError={categoryCrud.setCatError}
+        saveCategory={categoryCrud.saveCategory}
+        loading={categoryCrud.loading}
+        onCloseCreate={() => categoryCrud.setShowCategoryForm(false)}
+        editingCat={categoryCrud.editingCat}
+        editCatName={categoryCrud.editCatName}
+        setEditCatName={categoryCrud.setEditCatName}
+        updateCategory={categoryCrud.updateCategory}
+        onCloseEdit={() => categoryCrud.setEditingCat(null)}
+        confirmDeleteCat={categoryCrud.confirmDeleteCat}
+        deleteCategory={categoryCrud.deleteCategory}
+        onCloseDelete={() => categoryCrud.setConfirmDeleteCat(null)}
       />
 
-      {confirmBulkDelete && (
-        <Modal title="حذف المنتجات المحددة" onClose={() => setConfirmBulkDelete(false)}>
+      {bulk.confirmBulkDelete && (
+        <Modal title="حذف المنتجات المحددة" onClose={() => bulk.setConfirmBulkDelete(false)}>
           <div className="text-center">
             <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-danger-tint)]">
               <Trash2 className="h-6 w-6 text-[var(--color-danger)]" />
@@ -676,12 +344,12 @@ export function ProductsClient({
               <Button
                 variant="danger"
                 block
-                disabled={bulkBusy}
-                onClick={bulkDelete}
+                disabled={bulk.bulkBusy}
+                onClick={bulk.bulkDelete}
               >
-                {bulkBusy ? 'جاري…' : 'نعم، احذف'}
+                {bulk.bulkBusy ? 'جاري…' : 'نعم، احذف'}
               </Button>
-              <Button variant="secondary" onClick={() => setConfirmBulkDelete(false)}>
+              <Button variant="secondary" onClick={() => bulk.setConfirmBulkDelete(false)}>
                 إلغاء
               </Button>
             </div>
