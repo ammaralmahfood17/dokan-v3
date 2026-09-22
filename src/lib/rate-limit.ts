@@ -47,22 +47,30 @@ async function kvRateLimit(
     const cache = (await import('@/lib/cache')).getCacheProvider();
     const now = Date.now();
     const windowSeconds = Math.ceil(options.windowMs / 1000);
-    const result = await cache.hGetAll<{ count: number; resetAt: number }>(key);
 
-    if (!result || now > result.resetAt) {
-      await cache.hSet(key, { count: 1, resetAt: now + options.windowMs });
+    // Atomic check-and-increment: HINCRBY is the single source of truth.
+    // (The old hGetAll → check → hSet/hIncrBy order was a check-then-act race:
+    // concurrent requests read the same count, all pass the limit check, and
+    // the window admits more traffic than p_limit.)
+    const count = await cache.hIncrBy(key, 'count', 1);
+
+    if (count === 1) {
+      // Window opened by this request: stamp resetAt + attach the TTL once.
+      await cache.hSet(key, { resetAt: now + options.windowMs });
       await cache.expire(key, windowSeconds);
       return { allowed: true, remaining: options.limit - 1, resetIn: options.windowMs };
     }
 
-    if (result.count >= options.limit) {
-      return { allowed: false, remaining: 0, resetIn: result.resetAt - now };
+    if (count > options.limit) {
+      // Rejected: read the real window end for the retry-after message.
+      const rec = await cache.hGetAll<{ resetAt?: number }>(key);
+      const resetIn = Math.max(0, (rec?.resetAt ?? now + options.windowMs) - now);
+      return { allowed: false, remaining: 0, resetIn };
     }
 
-    await cache.hIncrBy(key, 'count', 1);
-    return { allowed: true, remaining: options.limit - result.count - 1, resetIn: result.resetAt - now };
+    return { allowed: true, remaining: options.limit - count, resetIn: options.windowMs };
   } catch {
-    return null; // Fall through to in-memory
+    return null; // Fall through to Supabase path
   }
 }
 
