@@ -331,6 +331,39 @@ export function ProductsClient({
         onCloseDelete={() => categoryCrud.setConfirmDeleteCat(null)}
       />
 
+      {/* FIX-DEL-001: the single-product confirm modal was LOST in the
+          FIX-C-001 extraction — the form modal's «حذف» button set
+          confirmDelete and deleteProduct existed, but nothing ever rendered
+          the confirmation, so deleting one product was a silent no-op.
+          Restores the flow (same pattern/wording as the bulk-delete modal). */}
+      {confirmDelete && (
+        <Modal title="حذف المنتج" onClose={() => setConfirmDelete(null)}>
+          <div className="text-center">
+            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-danger-tint)]">
+              <Trash2 className="h-6 w-6 text-[var(--color-danger)]" />
+            </div>
+            <p className="mb-5 text-xs text-[var(--color-text-secondary)]">
+              هل أنت متأكد من حذف «{confirmDelete.name}»؟ لا يمكن التراجع.
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="danger"
+                block
+                onClick={() => {
+                  deleteProduct(confirmDelete.id);
+                  setConfirmDelete(null);
+                }}
+              >
+                نعم، احذف
+              </Button>
+              <Button variant="secondary" onClick={() => setConfirmDelete(null)}>
+                إلغاء
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {bulk.confirmBulkDelete && (
         <Modal title="حذف المنتجات المحددة" onClose={() => bulk.setConfirmBulkDelete(false)}>
           <div className="text-center">
