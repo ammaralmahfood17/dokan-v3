@@ -744,6 +744,16 @@ export type Database = {
         Args: { p_caller_user_id?: string; p_project_id: string }
         Returns: number
       }
+      onboard_project_transactional: {
+        Args: {
+          p_created_by: string
+          p_currency: string
+          p_name: string
+          p_primary_color: string
+          p_slug: string
+        }
+        Returns: Json
+      }
       project_has_no_members: {
         Args: { p_project_id: string }
         Returns: boolean

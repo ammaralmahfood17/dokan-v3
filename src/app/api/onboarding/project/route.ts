@@ -121,50 +121,46 @@ export async function POST(request: NextRequest) {
 
     slug = finalSlug;
 
-    // Create project
-    const { data: project, error: projectErr } = await admin
-      .from('projects')
-      .insert({
-        name,
-        slug,
-        currency,
-        primary_color: primaryColor,
-        is_active: true,
-        created_by: user.id,
-      })
-      .select('id, name, slug')
-      .single();
+    // Atomic create: project + owner membership in ONE transaction
+    // (0007 — replaces the old insert/insert/best-effort-rollback dance;
+    // slug collision retries happen inside the RPC, race-free).
+    const { data: project, error: createErr } = await admin.rpc(
+      'onboard_project_transactional',
+      {
+        p_name: name,
+        p_slug: slug,
+        p_currency: currency,
+        p_primary_color: primaryColor,
+        p_created_by: user.id,
+      }
+    );
 
-    if (projectErr || !project) {
-      console.error('Project create error:', projectErr);
+    if (createErr || !project) {
+      console.error('Onboarding RPC error:', createErr);
+      if (createErr?.message?.includes('already has project')) {
+        return NextResponse.json(
+          { error: 'لديك مشروع بالفعل', redirect: '/dashboard' },
+          { status: 409 }
+        );
+      }
+      if (createErr?.message?.includes('no available slug')) {
+        return NextResponse.json(
+          { error: 'تعذر العثور على معرّف فريد. جرب اسماً مختلفاً.' },
+          { status: 409 }
+        );
+      }
       return NextResponse.json(
         { error: 'فشل إنشاء المشروع' },
         { status: 500 }
       );
     }
 
-    // Create owner membership (for old + new users)
-    const { error: staffErr } = await admin.from('staff_members').insert({
-      project_id: project.id,
-      user_id: user.id,
-      role: 'owner',
-    });
-
-    if (staffErr) {
-      console.error('Staff create error:', staffErr);
-      // Best-effort rollback
-      await admin.from('projects').delete().eq('id', project.id);
-      return NextResponse.json(
-        { error: 'فشل ربط الملكية بالمشروع' },
-        { status: 500 }
-      );
-    }
-
+    const created = project as unknown as { id: string; name: string; slug: string };
     return NextResponse.json({
       project: {
-        id: project.id,
-        name: project.name,
-        slug: project.slug,
+        id: created.id,
+        name: created.name,
+        slug: created.slug,
       },
     });
   } catch (err) {
