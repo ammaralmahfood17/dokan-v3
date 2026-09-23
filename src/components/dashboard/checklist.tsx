@@ -36,7 +36,7 @@ export function ChecklistSection({
     <section className="mb-8">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="font-display text-[15px] font-bold">قائمة الإعداد</h2>
-        <span className="text-xs font-semibold text-[var(--color-text-secondary)]">
+        <span dir="ltr" className="text-xs font-semibold text-[var(--color-text-secondary)]">
           {doneCount} / {checklist.length}
         </span>
       </div>

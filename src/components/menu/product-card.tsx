@@ -75,9 +75,6 @@ export function MenuProductRow({
       <div className="flex items-center justify-between gap-2 px-3 pb-3 pt-2">
         <span className="font-mono text-[14px] font-bold tabular-nums text-[var(--color-text)]" dir="ltr">
           {formatMoney(Number(product.price), currency)}
-          <span className="ms-1 text-[11px] font-semibold text-[var(--color-text-tertiary)]">
-            {currency}
-          </span>
         </span>
         {quantity === 0 ? (
           <button
@@ -94,7 +91,7 @@ export function MenuProductRow({
               type="button"
               onClick={onDecrement}
               aria-label={`إنقاص كمية ${displayName}`}
-              className="flex h-11 w-9 items-center justify-center transition-colors hover:bg-white/15"
+              className="flex h-11 w-11 items-center justify-center transition-colors hover:bg-white/15"
             >
               <Minus className="h-4 w-4" />
             </button>
@@ -105,7 +102,7 @@ export function MenuProductRow({
               type="button"
               onClick={() => onQuickAdd(product)}
               aria-label={`زيادة كمية ${displayName}`}
-              className="flex h-11 w-9 items-center justify-center transition-colors hover:bg-white/15"
+              className="flex h-11 w-11 items-center justify-center transition-colors hover:bg-white/15"
             >
               <Plus className="h-4 w-4" />
             </button>

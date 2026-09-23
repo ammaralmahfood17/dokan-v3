@@ -161,7 +161,7 @@ export function KitchenClient({
               }`}
             >
               {TAB_LABELS[t]}
-              <span className="ms-1 font-mono text-[11px] tabular-nums opacity-70">
+              <span dir="ltr" className="ms-1.5 inline-block whitespace-nowrap font-mono text-[11px] tabular-nums opacity-70">
                 · {String(countByTab[t]).padStart(2, '0')}
               </span>
               {tab === t && (

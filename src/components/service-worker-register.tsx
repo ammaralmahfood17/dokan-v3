@@ -19,6 +19,10 @@ export function ServiceWorkerRegister() {
     const showUpdateToast = () => {
       toast('🔄 تحديث متوفر', {
         description: 'نسخة جديدة من دكان جاهزة — أعد تحميل الصفحة للاستخدام',
+        // top-center covered the store header / nav on every page (UX report F5)
+        position: 'bottom-center',
+        duration: 8000,
+        id: 'sw-update',
         action: {
           label: 'إعادة تحميل',
           onClick: () => window.location.reload(),

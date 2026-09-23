@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUpDown, Search, X } from 'lucide-react';
+import { ArrowUpDown, CalendarDays, Search, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { formatMoney } from '@/lib/utils';
 import {
@@ -315,7 +315,7 @@ export function OrdersClient({
           أمس
         </button>
         <label className="flex min-h-[44px] cursor-pointer items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-xs font-semibold text-[var(--color-text-secondary)]">
-          📅
+          <CalendarDays className="h-4 w-4" aria-hidden="true" />
           <input
             type="date"
             value={dateKey}
@@ -341,7 +341,7 @@ export function OrdersClient({
             placeholder="ابحث برقم الطلب أو المنتج أو الطاولة…"
             aria-label="ابحث في الطلبات"
             maxLength={60}
-            className="input min-h-[44px] w-full ps-10 pe-10"
+            className="input min-h-[44px] w-full ps-10! pe-10!"
           />
           {query && (
             <button

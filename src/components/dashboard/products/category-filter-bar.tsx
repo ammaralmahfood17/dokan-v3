@@ -34,7 +34,7 @@ export function CategoryFilterBar({
       <div className="relative mb-4">
         <Search className="pointer-events-none absolute start-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]" />
         <input
-          className="input ps-10 pe-12"
+          className="input ps-10! pe-12!"
           placeholder="ابحث عن منتج…"
           maxLength={100}
           value={searchQuery}

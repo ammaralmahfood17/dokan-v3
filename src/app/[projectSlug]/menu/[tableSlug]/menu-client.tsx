@@ -70,8 +70,15 @@ export function MenuClient({
   // تبديل لغة العرض: عربي / English (يستخدم name_en عندما متاح)
   // FIX-I-003: حفظ تفضيل اللغة في localStorage (لا يضيع عند refresh)
   const [lang, setLang] = useState<'ar' | 'en'>(() => {
-    if (typeof window === 'undefined') return 'ar';
-    return localStorage.getItem('dokan-lang') === 'en' ? 'en' : 'ar';
+    // UX-report C5: the WRITE below is try/caught but this READ was not —
+    // Safari private mode / blocked storage throws on getItem and crashed
+    // the whole public menu. Guard the read the same way.
+    try {
+      if (typeof window === 'undefined') return 'ar';
+      return localStorage.getItem('dokan-lang') === 'en' ? 'en' : 'ar';
+    } catch {
+      return 'ar';
+    }
   });
   useEffect(() => {
     try {
@@ -502,7 +509,7 @@ export function MenuClient({
                 placeholder="ابحث عن منتج…"
                 aria-label="ابحث في القائمة"
                 maxLength={60}
-                className="input min-h-[44px] w-full ps-10 pe-10"
+                className="input min-h-[44px] w-full ps-10! pe-10!"
                 style={{ borderRadius: 'var(--radius-md)' }}
               />
               {menuQuery && (
@@ -510,7 +517,7 @@ export function MenuClient({
                   type="button"
                   onClick={() => setMenuQuery('')}
                   aria-label="مسح البحث"
-                  className="absolute end-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-[var(--color-text-muted)] hover:bg-[var(--color-surface-sunken)]"
+                  className="absolute end-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full text-[var(--color-text-muted)] hover:bg-[var(--color-surface-sunken)]"
                 >
                   <X className="h-4 w-4" />
                 </button>

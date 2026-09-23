@@ -30,7 +30,9 @@ export function PullToRefresh({
     const elNonNull = el; // narrowed for TypeScript closure
 
     function onTouchStart(e: TouchEvent) {
-      if (elNonNull.scrollTop <= 0) {
+      // FIX(ux-report F5/B5): the scrolling element is often window/body, not
+      // this container — el.scrollTop stays 0 and the pull hijacked mid-list.
+      if (elNonNull.scrollTop <= 0 && window.scrollY <= 0) {
         startY.current = e.touches[0].clientY;
         pulling.current = true;
         setIndicator({ pulling: true, distance: 0 });
