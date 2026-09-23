@@ -32,6 +32,16 @@ export async function POST(request: Request) {
       }, { status: 400 });
     }
 
+    // UX-report C4: admin.auth.admin.createUser BYPASSES GoTrue validation —
+    // without this, direct API calls could mint 1-char passwords. Mirrors the
+    // client rule (register/page.tsx: >=6) + bcrypt-safe 72 cap used by login.
+    if (typeof password !== 'string' || password.length < 6 || password.length > 72) {
+      return NextResponse.json({ error: 'كلمة المرور يجب أن تكون 6-72 حرفًا' }, { status: 400 });
+    }
+    if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return NextResponse.json({ error: 'بريد إلكتروني غير صالح' }, { status: 400 });
+    }
+
     // Rate limit: 3 signups per email per minute
     const rateKey = `signup:${email.trim().toLowerCase()}`;
     const limitResult = await rateLimit(rateKey, { limit: 3, windowMs: 60 * 1000, keyPrefix: 'auth-signup' });

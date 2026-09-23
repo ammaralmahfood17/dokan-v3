@@ -279,6 +279,7 @@ export function PosClient({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          projectId,
           type,
           notes: notes.trim() || undefined,
           items: lines.map((l) => ({
@@ -359,7 +360,7 @@ export function PosClient({
               placeholder="ابحث عن منتج… ( / )"
               aria-label="ابحث عن منتج"
               maxLength={60}
-              className="input min-h-[44px] w-full ps-10 pe-12"
+              className="input min-h-[44px] w-full ps-10! pe-12!"
               style={{ borderRadius: 'var(--radius-md)' }}
             />
             {query && (

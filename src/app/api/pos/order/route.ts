@@ -41,6 +41,7 @@ export async function POST(request: NextRequest) {
       type?: OrderType;
       items?: PublicOrderItemInput[];
       notes?: string;
+      projectId?: string;
     };
 
     const type: OrderType =
@@ -52,15 +53,36 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'السلة فارغة' }, { status: 400 });
     }
 
-    const { data: membership } = await userClient
+    const { data: memberships } = await userClient
       .from('staff_members')
       .select('project_id, projects(currency)')
-      .eq('user_id', user.id)
-      .limit(1)
-      .maybeSingle();
-
-    if (!membership) {
+      .eq('user_id', user.id);
+    const list = memberships ?? [];
+    if (!list.length) {
       return NextResponse.json({ error: 'لا يوجد مشروع' }, { status: 403 });
+    }
+    // UX-report C2: a staff member in MULTIPLE projects must not be resolved
+    // to an arbitrary store via .limit(1) (wrong-tenant orders). The POS page
+    // always sends its server-rendered projectId; single-membership users are
+    // grandfathered for the deploy window (cached SW/PWA clients).
+    const bodyPid = (body as { projectId?: unknown }).projectId;
+    let membership: (typeof list)[number];
+    if (typeof bodyPid === 'string' && bodyPid) {
+      if (!/^[0-9a-f-]{36}$/i.test(bodyPid)) {
+        return NextResponse.json({ error: 'معرّف متجر غير صالح' }, { status: 400 });
+      }
+      const hit = list.find((m) => m.project_id === bodyPid);
+      if (!hit) {
+        return NextResponse.json({ error: 'لست موظفًا في هذا المتجر' }, { status: 403 });
+      }
+      membership = hit;
+    } else if (list.length === 1) {
+      membership = list[0];
+    } else {
+      return NextResponse.json(
+        { error: 'معرّف المتجر مطلوب — أنت موظف في أكثر من متجر' },
+        { status: 400 }
+      );
     }
 
     // B2: POS must also respect project activity + subscription — an owner

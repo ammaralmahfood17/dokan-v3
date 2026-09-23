@@ -38,26 +38,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'بيانات غير صالحة' }, { status: 400 });
     }
 
-    // Verify user has access to a project (is staff)
-    const { data: membership } = await userClient
+    // Verify staff membership. UX-report C2: multi-project staff must be
+    // authorized against the ORDER's project, not an arbitrary .limit(1) row
+    // (which 404'd legitimate cancels when the picked membership differed).
+    const { data: memberships } = await userClient
       .from('staff_members')
       .select('project_id')
-      .eq('user_id', user.id)
-      .limit(1)
-      .maybeSingle();
-
-    if (!membership) {
+      .eq('user_id', user.id);
+    const projectIds = (memberships ?? []).map((m) => m.project_id);
+    if (!projectIds.length) {
       return NextResponse.json({ error: 'لا يوجد مشروع' }, { status: 403 });
     }
 
     const supabase = createAdminClient();
 
-    // Get current order state — verify it belongs to user's project
+    // Get current order state — verify it belongs to one of the user's projects
     const { data: order } = await supabase
       .from('orders')
-      .select('id, status, total_amount')
+      .select('id, status, total_amount, project_id')
       .eq('id', orderId)
-      .eq('project_id', membership.project_id)
+      .in('project_id', projectIds)
       .single();
 
     if (!order) {
@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
       .from('orders')
       .update({ status: 'cancelled' })
       .eq('id', orderId)
-      .eq('project_id', membership.project_id)
+      .in('project_id', projectIds)
       .in('status', ['pending', 'preparing', 'ready'])
       .select('id')
       .maybeSingle();
@@ -107,7 +107,7 @@ export async function POST(request: NextRequest) {
     try {
       await supabase.from('order_audit_logs').insert({
         order_id: orderId,
-        project_id: membership.project_id,
+        project_id: order.project_id,
         event: 'cancelled',
         old_status: order.status,
         new_status: 'cancelled',
