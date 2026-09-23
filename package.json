@@ -9,7 +9,8 @@
     "lint": "eslint . --max-warnings 0",
     "db:types": "supabase gen types typescript --linked --schema public > src/lib/database.types.ts",
     "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:ui": "playwright test --ui",
+    "sweep:test-data": "node scripts/sweep-test-data.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.69.0",

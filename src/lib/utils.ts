@@ -53,17 +53,6 @@ export function generateSlug(input: string): string {
  * Suggest a unique slug by appending -1, -2... against a list of existing slugs.
  * Lightweight helper for better default suggestions.
  */
-export function ensureUniqueSlug(base: string, existing: string[] = []): string {
-  let candidate = generateSlug(base);
-  if (!existing.includes(candidate)) return candidate;
-
-  let i = 1;
-  while (existing.includes(`${candidate}-${i}`)) {
-    i++;
-  }
-  return `${candidate}-${i}`;
-}
-
 /** Decimal places per currency (Gulf): BHD/KWD/OMR = 3, others = 2. */
 export const CURRENCY_DECIMALS: Record<string, number> = {
   BHD: 3,
@@ -88,12 +77,6 @@ export function money(value: number, decimals = 3): number {
   if (!Number.isFinite(value)) return 0;
   const factor = 10 ** decimals;
   return Math.round((value + Number.EPSILON) * factor) / factor;
-}
-
-/** True when value is a valid finite money amount (>= 0) */
-export function isValidMoney(value: unknown): value is number {
-  const n = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(n) && n >= 0;
 }
 
 // AR-1: locale عربي لكل عملة خليجية — الأرقام تُثبَّت لاتينية (0-9) عبر

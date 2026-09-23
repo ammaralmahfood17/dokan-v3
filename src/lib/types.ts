@@ -123,20 +123,7 @@ export interface PublicOrderItemInput {
   notes?: string;
 }
 
-export interface PublicOrderRequest {
-  projectSlug: string;
-  tableSlug: string;
-  items: PublicOrderItemInput[];
-  notes?: string;
-}
 
-export interface PublicOrderResponse {
-  order: {
-    id: string;
-    status: OrderStatus;
-    totalAmount: number;
-  };
-}
 
 /** Cart line used on the public menu */
 export interface CartLine {

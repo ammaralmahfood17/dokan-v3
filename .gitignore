@@ -35,6 +35,7 @@ next-env.d.ts
 supabase/.branches
 supabase/.temp
 .env*
+!.env.example
 
 # agent scaffolding (not project code)
 .claude/

@@ -213,17 +213,37 @@ test('C1 dashboard loads with store greeting + KPI structure', async ({ page }) 
   await expect(page.getByText('نشط').first()).toBeVisible();
 });
 
-test('C2 products: availability toggle syncs DB + public menu', async ({ page, request }) => {
-  await asOwner(page);
+test('C2 products: availability toggle syncs DB + menu cache (revalidate-menu)', async ({ page, request }) => {
+  await asOwner(page); // owner session lives in the shared context jar
   await page.goto('/dashboard/products');
   await expect(page.getByText('شاي فحص').first()).toBeVisible();
-  // flip via the same API the UI uses
+
+  const jar = { Cookie: (await OWNER_COOKIES()).map((c) => `${c.name}=${c.value}`).join('; ') };
+
+  // sold out → purge via the SAME endpoint the dashboard uses → menu hides
   await admin.from('products').update({ is_available: false }).eq('id', productId);
-  const menu = await request.get(`/${slugA}/menu/a-1`);
-  expect(await menu.text(), 'sold-out product leaves the menu').not.toContain('شاي فحص');
+  expect((await request.post('/api/revalidate-menu', { data: { projectId }, headers: jar })).status()).toBe(200);
+  const gone = await request.get(`/${slugA}/menu/a-1`);
+  expect(await gone.text(), 'sold-out product leaves the menu').not.toContain('شاي فحص');
+
+  // back in stock → same ritual → product returns. Vercel tag invalidation
+  // propagates over the edge network (the dashboard UI has the same delay) —
+  // poll instead of assuming instant purge, and check DB truth separately so
+  // a failure tells cache-staleness apart from a broken toggle.
   await admin.from('products').update({ is_available: true }).eq('id', productId);
-  const back = await request.get(`/${slugA}/menu/a-1`);
-  expect(await back.text()).toContain('شاي فحص');
+  const { data: dbNow } = await admin.from('products').select('is_available').eq('id', productId).single();
+  expect(dbNow!.is_available, 'DB toggle-back').toBe(true);
+  expect((await request.post('/api/revalidate-menu', { data: { projectId }, headers: jar })).status()).toBe(200);
+  await expect
+    .poll(
+      async () => (await (await request.get(`/${slugA}/menu/a-1`)).text()).includes('شاي فحص'),
+      { timeout: 40_000, intervals: [1000, 2000, 3000] }
+    )
+    .toBe(true);
+
+  // cache purge is tenant-gated: anonymous must not purge another store's menu
+  const anonPurge = await request.post('/api/revalidate-menu', { data: { projectId } });
+  expect(anonPurge.status()).toBe(401);
 });
 
 test('C3 tables page lists the seeded table', async ({ page }) => {
@@ -232,10 +252,14 @@ test('C3 tables page lists the seeded table', async ({ page }) => {
   await expect(page.getByText(/طاولة 1|1/).first()).toBeVisible();
 });
 
-test('C4 analytics: loads without error boundary', async ({ page }) => {
+test('C4 analytics: renders the designed empty-state for a store with no orders yet', async ({ page }) => {
   await asOwner(page);
   await page.goto('/dashboard/analytics');
-  await expect(page.getByText(/تحليلات|المبيعات|الإيرادات/).first()).toBeVisible({ timeout: 25_000 });
+  await expect(page.getByText('الإحصائيات').first()).toBeVisible({ timeout: 30_000 });
+  // Zero orders at this stage → KPI cards + explicit empty state (charts are
+  // conditional by design). Full-chart path is covered by the existing
+  // super-admin Phase B spec and by C4b after orders exist.
+  await expect(page.getByText('ما فيه بيانات في هذه الفترة')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText('Something went wrong')).toHaveCount(0);
 });
 
@@ -243,7 +267,7 @@ test('C5 notification prefs persist through the API (staff table truth)', async 
   const cookies = await OWNER_COOKIES();
   await page.context().addCookies(cookies);
   await page.goto('/dashboard'); // establish cookie jar on page origin
-  const res = await request.post('/api/staff/notification-prefs', {
+  const res = await request.put('/api/staff/notification-prefs', {
     data: { projectId, notifyPush: false, notifyTelegram: true },
     headers: { Cookie: cookies.map((c) => `${c.name}=${c.value}`).join('; ') },
   });
@@ -310,7 +334,7 @@ test('D5 POS order + cancel via API (owner membership enforced)', async ({ page,
   const cookies = await OWNER_COOKIES();
   const jar = { Cookie: cookies.map((c) => `${c.name}=${c.value}`).join('; ') };
   const mk = await request.post('/api/pos/order', {
-    data: { type: 'walkin', items: [{ productId, quantity: 1 }] },
+    data: { projectId, type: 'walkin', items: [{ productId, quantity: 1 }] },
     headers: jar,
   });
   expect(mk.status(), await mk.text().catch(() => '')).toBe(200);
@@ -324,6 +348,15 @@ test('D5 POS order + cancel via API (owner membership enforced)', async ({ page,
   expect(data!.status).toBe('cancelled');
 });
 
+test('D6 analytics with live data: charts appear once orders exist', async ({ page }) => {
+  await asOwner(page);
+  await page.goto('/dashboard/analytics');
+  await expect(page.getByText('الإحصائيات').first()).toBeVisible({ timeout: 30_000 });
+  // at least one order exists now (D1/D3/D5) → charts replace the empty state
+  await expect(page.locator('h2', { hasText: 'الإيراد اليومي' }).first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('h2', { hasText: 'الأكثر' }).first()).toBeVisible();
+});
+
 /* ====================================================================== *
  * E) SUPER-ADMIN CONSOLE
  * ====================================================================== */
@@ -334,15 +367,21 @@ test('E1 subscriptions page lists the audit store', async ({ page }) => {
 });
 
 test('E2 renew adds days (visible + DB truth)', async ({ page }) => {
+  // fresh context per test → the SA session must be established here (E1's does not leak)
+  await page.context().addCookies(await SA_COOKIES());
   const before = (await admin.from('projects').select('subscription_expires_at').eq('id', projectId).single()).data!;
-  const res = await page.request.post('/api/super-admin/renew', { data: { projectId, days: 15 } });
+  // NOTE: the route reads projectId from the QUERY string (the super-admin UI
+  // posts a form action with ?projectId=) — body-only payloads get a 400.
+  const res = await page.request.post(`/api/super-admin/renew?projectId=${projectId}`, { data: {} });
   expect(res.status(), await res.text().catch(() => '')).toBe(200);
   const after = (await admin.from('projects').select('subscription_expires_at').eq('id', projectId).single()).data!;
   expect(new Date(after!.subscription_expires_at) > new Date(before!.subscription_expires_at)).toBe(true);
 });
 
 test('E3 deactivate → public order blocked → reactivate', async ({ page, request }) => {
-  await page.request.post('/api/super-admin/deactivate', { data: { projectId } });
+  await page.context().addCookies(await SA_COOKIES()); // fresh context per test
+  const deact = await page.request.post(`/api/super-admin/deactivate?projectId=${projectId}`, { data: {} });
+  expect(deact.status(), await deact.text().catch(() => '')).toBe(200);
   const blocked = await request.post('/api/public/order', {
     data: { projectSlug: slugA, tableSlug: 'a-1', items: [{ productId, quantity: 1 }] },
   });
@@ -351,20 +390,38 @@ test('E3 deactivate → public order blocked → reactivate', async ({ page, req
   await admin.from('projects').update({ is_active: true }).eq('id', projectId);
 });
 
-test('E4 impersonate → support banner → end restores owner view', async ({ page }) => {
+test('E4 impersonate → support banner → end restores admin session', async ({ page }) => {
+  const { E2E_HOST } = await import('./helpers');
   await page.context().addCookies(await SA_COOKIES());
   const start = await page.request.post('/api/super-admin/impersonate', {
     data: { targetUserId: ownerId, projectId },
   });
   expect(start.status(), await start.text().catch(() => '')).toBe(200);
+  const body = (await start.json()) as { sessionId?: string; targetSession?: { access_token: string } };
+  expect(body.sessionId, 'start returns session id + target session (ImpersonateButton contract)').toBeTruthy();
+  expect(body.targetSession?.access_token).toBeTruthy();
+
+  // Mirror ImpersonateButton: the browser jar must SWAP to the target's
+  // session + marker — the marker alone doesn't switch who /dashboard renders for.
+  await page.context().clearCookies();
+  await page.context().addCookies([
+    { name: `sb-${E2E_HOST.split('.')[0]}-auth-token`, value: JSON.stringify(body.targetSession), domain: E2E_HOST, path: '/' },
+    { name: 'dokan-impersonation', value: body.sessionId!, domain: E2E_HOST, path: '/' },
+  ]);
   await page.goto('/dashboard');
-  await expect(page.getByText(/وضع الدعم الفني/)).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/وضع الدعم الفني/).first()).toBeVisible({ timeout: 20_000 });
+
+  // END (2026-09-20 hardening): marker-only credential, admin restored
+  // server-side; response body must never carry tokens.
   const end = await page.request.post('/api/super-admin/impersonate/end');
   expect(end.status()).toBe(200);
+  const endBody = await end.json();
+  expect(endBody.ok).toBe(true);
+  expect(endBody.superAdminSession, 'admin tokens must not transit the body').toBeUndefined();
 });
 
 test('E5 audit log recorded admin actions + analytics page renders', async ({ page }) => {
-  const { data } = await admin.from('super_admin_audit_log').select('action').eq('project_id', projectId);
+  const { data } = await admin.from('super_admin_audit_log').select('action').eq('target_project_id', projectId);
   expect((data ?? []).length, 'renew/deactivate/impersonate audited').toBeGreaterThanOrEqual(2);
   await page.goto('/super-admin/audit');
   await expect(page.getByText(storeName).or(page.getByText(/سجل/)).first()).toBeVisible({ timeout: 25_000 });
@@ -399,7 +456,9 @@ test('F2 cross-tenant: stranger cannot place POS orders in store A', async ({ re
 });
 
 test('F3 anon JWT rejected on owner-only APIs', async ({ request }) => {
-  for (const path of ['/api/onboarding/project', '/api/pos/cancel', '/api/super-admin/renew']) {
+  // renew validates the query projectId BEFORE auth — send a well-formed one
+  // so the assertion exercises the 401 wall, not the 400 param guard.
+  for (const path of ['/api/onboarding/project', '/api/pos/cancel', `/api/super-admin/renew?projectId=${projectId}`]) {
     const res = await request.post(path, { data: {} });
     expect(res.status(), path).toBeLessThan(500);
     expect([401, 403], path).toContain(res.status());
