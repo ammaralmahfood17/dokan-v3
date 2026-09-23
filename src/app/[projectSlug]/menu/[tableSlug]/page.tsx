@@ -3,6 +3,7 @@ import { unstable_cache } from 'next/cache';
 import type { Metadata } from 'next';
 import { createAnonClient } from '@/lib/supabase/anon';
 import { getSiteUrl } from '@/lib/site-url';
+import { getPublicProject } from '@/lib/public-project';
 import { MenuClient } from './menu-client';
 import type { Category, Product, ProductAddon, Project, Table } from '@/lib/types';
 
@@ -63,13 +64,7 @@ export async function generateMetadata({
   params: Promise<{ projectSlug: string; tableSlug: string }>;
 }): Promise<Metadata> {
   const { projectSlug, tableSlug } = await params;
-  const supabase = createAnonClient();
-  const { data: project } = await supabase
-    .from('projects')
-    .select('name')
-    .eq('slug', projectSlug)
-    .eq('is_active', true)
-    .maybeSingle();
+  const project = await getPublicProject(projectSlug);
   return {
     title: project?.name ? `${project.name} — القائمة` : 'القائمة',
     alternates: {
@@ -88,24 +83,7 @@ export default async function PublicMenuPage({
   // so signed-in users see other restaurants' menus too
   const supabase = createAnonClient();
 
-  // Resolve active project by slug + HARD subscription check via the
-  // SECURITY DEFINER RPC (anon can't read subscription_expires_at — 0006
-  // column-scoped grants — and pg_cron's is_active flip is daily, which
-  // would leak up to 24h of free service after expiry). Exact cutoff.
-  const { data: isAvailable } = await supabase.rpc('is_project_publicly_available', {
-    p_slug: projectSlug,
-  });
-  if (!isAvailable) notFound();
-
-  // Explicit column list (NOT select('*')): anon has column-scoped grants
-  // on projects (0006 hides created_by and subscription_expires_at).
-  const { data: project } = await supabase
-    .from('projects')
-    .select('id, name, slug, currency, primary_color, logo_url, is_active')
-    .eq('slug', projectSlug)
-    .eq('is_active', true)
-    .maybeSingle();
-
+  const project = await getPublicProject(projectSlug);
   if (!project) notFound();
 
   // Resolve active table inside project

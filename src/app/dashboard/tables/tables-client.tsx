@@ -234,6 +234,24 @@ export function TablesClient({
         </div>
       </div>
 
+      {/* D2: رابط المتجر — يشاركه التاجر مع زبائنه (يفتح صفحة المتجر العامة) */}
+      <section className="mb-6">
+        <p className="section-title">رابط المتجر</p>
+        <div className="dashboard-card card flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <p className="text-sm text-[var(--color-text-secondary)]" dir="ltr">
+            {siteUrl}/{projectSlug}
+          </p>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => copyUrl(`${siteUrl}/${projectSlug}`)}
+          >
+            <Copy className="h-3.5 w-3.5" />
+            نسخ الرابط
+          </Button>
+        </div>
+      </section>
+
       <section>
         <p className="section-title">الطاولات</p>
         {!tables.length ? (
