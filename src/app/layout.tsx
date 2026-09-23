@@ -21,6 +21,10 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseOrigin = supabaseUrl ? new URL(supabaseUrl).origin : '';
 
 export const metadata: Metadata = {
+  // A2: canonical base — relative metadata URLs (og image, canonical) resolve
+  // against the site origin instead of leaking to vercel.app/www mirrors.
+  metadataBase: new URL(getSiteUrl()),
+  alternates: { canonical: '/' },
   title: {
     default: 'دكان — منصة إدارة المطاعم',
     template: '%s — دكان',

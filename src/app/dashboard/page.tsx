@@ -197,9 +197,8 @@ export default async function DashboardPage() {
         </div>
         <div
           className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 font-mono text-[12.5px] tabular-nums text-[var(--color-text)]"
-          dir="ltr"
         >
-          TODAY · {nowTime}
+          اليوم · {nowTime}
         </div>
       </div>
 

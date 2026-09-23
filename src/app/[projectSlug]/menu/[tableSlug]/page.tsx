@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import { unstable_cache } from 'next/cache';
+import type { Metadata } from 'next';
 import { createAnonClient } from '@/lib/supabase/anon';
 import { getSiteUrl } from '@/lib/site-url';
 import { MenuClient } from './menu-client';
@@ -52,6 +53,29 @@ async function getMenuData(projectId: string, tableId: string) {
 // static generation: first visit builds the page, then it's cached & revalidated.
 export async function generateStaticParams() {
   return [];
+}
+
+// A2/UX-report: every public menu served under 3 hostnames had no canonical —
+// search engines saw duplicates. Store name also becomes the tab/OG title.
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ projectSlug: string; tableSlug: string }>;
+}): Promise<Metadata> {
+  const { projectSlug, tableSlug } = await params;
+  const supabase = createAnonClient();
+  const { data: project } = await supabase
+    .from('projects')
+    .select('name')
+    .eq('slug', projectSlug)
+    .eq('is_active', true)
+    .maybeSingle();
+  return {
+    title: project?.name ? `${project.name} — القائمة` : 'القائمة',
+    alternates: {
+      canonical: `${getSiteUrl()}/${projectSlug}/menu/${tableSlug}`,
+    },
+  };
 }
 
 export default async function PublicMenuPage({

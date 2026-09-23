@@ -45,11 +45,39 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  async redirects() {
+    // A2/UX-report: www + apex were duplicate content. Env-driven (never
+    // hardcode a domain — repo contract): redirect www.<apex> → apex, 308.
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+    if (!siteUrl) return [];
+    let host: string;
+    try {
+      host = new URL(siteUrl).hostname;
+    } catch {
+      return [];
+    }
+    if (host === 'localhost') return [];
+    return [
+      {
+        source: '/:path*',
+        has: [{ type: 'host', value: `www.${host}` }],
+        destination: `https://${host}/:path*`,
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     return [
       {
         source: '/(.*)',
         headers: securityHeaders,
+      },
+      // A2: <project>.vercel.app serves the same app (e2e target) — keep it
+      // out of search engines so the canonical domain is the only one indexed.
+      {
+        source: '/(.*)',
+        has: [{ type: 'host', value: '(?<host>.+)\\.vercel\\.app' }],
+        headers: [{ key: 'X-Robots-Tag', value: 'noindex, nofollow' }],
       },
     ];
   },
