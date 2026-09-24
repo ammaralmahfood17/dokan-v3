@@ -3,7 +3,7 @@
 // FIX-C-003: Order-success screen — extracted from menu-client.tsx.
 // UX-U1: شريط حالة الطلب الحي — polling خفيف (12s) على /api/public/order-status
 // يعرض تقدم الطلب (قيد الانتظار → قيد التحضير → جاهز) مع اهتزاز عند الجاهزية.
-import { Bell, Check, FileText, Clock } from 'lucide-react';
+import { Bell, Check, Copy, FileText, Clock } from 'lucide-react';
 import { formatMoney } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { useEffect, useRef, useState } from 'react';
@@ -35,6 +35,8 @@ export function OrderSuccessState({
   busyAction,
   onCallService,
   onOrderMore,
+  canReorder,
+  onReorder,
 }: {
   orderNumber: number;
   orderId?: string;
@@ -44,11 +46,26 @@ export function OrderSuccessState({
   busyAction: 'waiter' | 'bill' | null;
   onCallService: (kind: 'waiter' | 'bill') => void;
   onOrderMore: () => void;
+  /** UX-6: «كرر الطلب» — restore the same lines into the cart. */
+  canReorder?: boolean;
+  onReorder?: () => void;
 }) {
   const [status, setStatus] = useState<OrderStatus | null>(null);
   const [lost, setLost] = useState(false);
+  const [copied, setCopied] = useState(false);
   const notifiedRef = useRef(false);
   const attemptsRef = useRef(0);
+
+  // UX-6: نسخ رقم الطلب — للرجوع له عند سؤال الموظف
+  async function copyOrderNumber() {
+    try {
+      await navigator.clipboard.writeText(String(orderNumber));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard محجوب (سياق غير آمن) — الرقم ظاهر للنسخ اليدوي أصلاً
+    }
+  }
 
   // UX-U1: polling خفيف — يتوقف عند جاهز/ملغي/تم التسليم أو بعد 20 محاولة (~4 دقائق)
   useEffect(() => {
@@ -60,10 +77,14 @@ export function OrderSuccessState({
         const res = await fetch(
           `/api/public/order-status?orderId=${encodeURIComponent(orderId)}&projectSlug=${encodeURIComponent(projectSlug)}`
         );
-        if (!res.ok) return;
+        if (!res.ok) {
+          setLost(true);
+          return;
+        }
         const data = (await res.json()) as { status: OrderStatus };
         if (stopped) return;
         setStatus(data.status);
+        setLost(false);
 
         const idx = stepIndex(data.status);
         if (idx >= 2) {
@@ -108,7 +129,15 @@ export function OrderSuccessState({
         رقم الطلب{' '}
         <span dir="ltr" className="font-bold">
           order-{orderNumber}
-        </span>
+        </span>{' '}
+        <button
+          type="button"
+          onClick={copyOrderNumber}
+          aria-label="نسخ رقم الطلب"
+          className="inline-flex h-11 w-11 -translate-y-0.5 items-center justify-center rounded-full text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-sunken)]"
+        >
+          {copied ? <Check className="h-4 w-4 text-[var(--color-primary)]" /> : <Copy className="h-4 w-4" />}
+        </button>
       </p>
       <p className="mt-2 text-lg font-bold">{formatMoney(totalAmount, currency)}</p>
 
@@ -175,9 +204,16 @@ export function OrderSuccessState({
         </button>
       </div>
 
-      <Button className="mt-6" variant="secondary" onClick={onOrderMore}>
-        طلب المزيد
-      </Button>
+      <div className="mt-6 flex w-full max-w-xs flex-col gap-3">
+        <Button variant="secondary" onClick={onOrderMore}>
+          طلب المزيد
+        </Button>
+        {canReorder && onReorder && (
+          <Button variant="ghost" onClick={onReorder}>
+            كرر الطلب (نفس الأصناف)
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

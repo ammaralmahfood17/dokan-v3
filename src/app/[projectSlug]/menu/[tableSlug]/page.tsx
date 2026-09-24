@@ -31,11 +31,14 @@ async function getMenuData(projectId: string, tableId: string) {
           .eq('project_id', projectId)
           .eq('is_active', true)
           .order('sort_order', { ascending: true }),
+        // UX-6 (0011): sold-out items are fetched too and rendered greyed-out
+        // with a «غير متوفر» badge instead of vanishing from the menu. Order
+        // safety is server-side: createSecureOrder rejects unavailable items.
         supabase
           .from('products')
           .select('*, product_addons(*)')
           .eq('project_id', projectId)
-          .eq('is_available', true)
+          .order('is_available', { ascending: false })
           .order('sort_order'),
       ]);
       return {

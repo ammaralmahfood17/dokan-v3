@@ -35,6 +35,9 @@ const BLUR_PLACEHOLDER =
 
 type ProductWithAddons = Product & { product_addons: ProductAddon[] };
 
+/** UX-6: one-tap common item notes (drinks + food, Gulf phrasing). */
+const QUICK_NOTE_CHIPS = ['بدون سكر', 'بدون ثلج', 'ثلج على جنب', 'حار زيادة'];
+
 export function MenuClient({
   project,
   table,
@@ -63,6 +66,9 @@ export function MenuClient({
   } | null>(null);
   const [activeCategory, setActiveCategory] = useState<string | 'all'>('all');
   const [busyAction, setBusyAction] = useState<'waiter' | 'bill' | null>(null);
+  // UX-6: snapshot of the last placed cart — powers «كرر الطلب» on the
+  // success screen (re-fill the same lines, customer just hits send again).
+  const [lastCart, setLastCart] = useState<CartLine[] | null>(null);
   const [lastAddedKey, setLastAddedKey] = useState<string | null>(null);
   const lastAddedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // بحث في المنتجات (فقط للمنيو الكبير — 12+ منتج)
@@ -149,6 +155,21 @@ export function MenuClient({
     setItemNotes('');
   }
 
+  /** UX-6: append/remove a quick-note phrase, keeping the 200-char cap. */
+  function toggleQuickNote(note: string) {
+    setItemNotes((prev) => {
+      if (prev.includes(note)) {
+        return prev
+          .replace(note, '')
+          .replace(/،،+/g, '،')
+          .replace(/^[،\s]+/, '')
+          .replace(/[،\s]+$/, '');
+      }
+      const next = prev.trim() ? `${prev}، ${note}` : note;
+      return next.length <= 200 ? next : prev;
+    });
+  }
+
   function confirmAdd() {
     if (!picker) return;
     const addons: OrderItemAddon[] = (picker.product_addons || [])
@@ -203,6 +224,9 @@ export function MenuClient({
 
   // Quick-Add: add directly without addon picker
   function quickAdd(p: ProductWithAddons) {
+    // UX-6 guard: sold-out cards already block interaction, but the picker/
+    // stepper paths must never queue an unavailable item (server would 400).
+    if (!p.is_available) return;
     if ((p.product_addons || []).filter((a) => a.is_available).length > 0) {
       openProduct(p);
       return;
@@ -279,6 +303,13 @@ export function MenuClient({
         return;
       }
       setOrderError(null);
+      // UX-6: if the merchant changed a price while the customer was
+      // collecting, the server total wins — say so instead of silently
+      // charging a different amount than the cart showed.
+      if (Math.abs(Number(data.order.totalAmount) - total) > 0.0005) {
+        toast('تم تحديث سعر بعض الأصناف — المبلغ المعروض هو النهائي', { duration: 4000 });
+      }
+      setLastCart(cart);
       setOrderDone({
         id: data.order.id,
         totalAmount: data.order.totalAmount,
@@ -368,6 +399,14 @@ export function MenuClient({
         busyAction={busyAction}
         onCallService={callService}
         onOrderMore={() => setOrderDone(null)}
+        canReorder={!!lastCart?.length}
+        onReorder={() => {
+          if (lastCart?.length) {
+            setCart(lastCart);
+            setOrderDone(null);
+            setCartOpen(true);
+          }
+        }}
       />
     );
   }
@@ -431,7 +470,7 @@ export function MenuClient({
           {/* Table chip */}
           <div className="flex items-center gap-1.5">
             <div className="rounded-full border border-[var(--color-border-strong)] px-3 py-1 font-mono text-[12px] font-semibold tabular-nums text-[var(--color-text-secondary)]">
-              TABLE·{String(table.number).padStart(2, '0')}
+              {lang === 'en' ? 'Table' : 'طاولة'} <span dir="ltr">{String(table.number).padStart(2, '0')}</span>
             </div>
             <button
               type="button"
@@ -687,6 +726,28 @@ export function MenuClient({
           )}
           <div className="field">
             <label className="label">ملاحظة على الصنف</label>
+            {/* UX-6: quick-note chips — most common Gulf requests, one tap
+                each. Toggle adds/removes the phrase from the notes text. */}
+            <div className="mb-2 flex flex-wrap gap-1.5" role="group" aria-label="ملاحظات سريعة">
+              {QUICK_NOTE_CHIPS.map((note) => {
+                const on = itemNotes.includes(note);
+                return (
+                  <button
+                    key={note}
+                    type="button"
+                    onClick={() => toggleQuickNote(note)}
+                    aria-pressed={on}
+                    className={`min-h-[44px] rounded-full border px-3.5 text-[12.5px] font-semibold transition-colors ${
+                      on
+                        ? 'border-[var(--color-primary)] bg-[var(--color-primary-tint)] text-[var(--color-primary)]'
+                        : 'border-[var(--color-border-strong)] bg-[var(--color-surface)] text-[var(--color-text-secondary)]'
+                    }`}
+                  >
+                    {note}
+                  </button>
+                );
+              })}
+            </div>
             <input
               className="input"
               value={itemNotes}

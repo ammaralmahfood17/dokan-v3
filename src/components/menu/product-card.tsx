@@ -7,7 +7,7 @@
 // v1.1 Calm Surface: borders instead of shadows, indigo restricted to the
 // add control, tabular Latin numerals for the price.
 import Image from 'next/image';
-import { Check, Minus, Plus } from 'lucide-react';
+import { Check, Minus, Plus, X } from 'lucide-react';
 import { formatMoney } from '@/lib/utils';
 import type { Product, ProductAddon } from '@/lib/types';
 
@@ -38,13 +38,23 @@ export function MenuProductRow({
   onQuickAdd: (p: MenuProduct) => void;
   onDecrement: () => void;
 }) {
+  // UX-6: sold-out items stay visible, greyed, with a «غير متوفر» badge —
+  // customers shouldn't conclude the store shrank when an item is marked
+  // unavailable. Ordering is blocked both here and server-side (order API).
+  const soldOut = !product.is_available;
   return (
-    <div className="flex flex-col overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] transition-colors duration-150 hover:border-[var(--color-border-strong)]">
+    <div className="relative flex flex-col overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] transition-colors duration-150 hover:border-[var(--color-border-strong)]">
+      {soldOut && (
+        <span className="absolute start-2 top-2 z-10 rounded-full bg-[var(--color-text)] px-2.5 py-1 text-[11px] font-bold text-white">
+          غير متوفر
+        </span>
+      )}
       <button
         type="button"
-        onClick={() => onQuickAdd(product)}
-        aria-label={`إضافة ${displayName} إلى السلة`}
-        className="flex min-w-0 flex-col text-start"
+        onClick={() => (soldOut ? undefined : onQuickAdd(product))}
+        aria-label={soldOut ? `${displayName} — غير متوفر` : `إضافة ${displayName} إلى السلة`}
+        aria-disabled={soldOut}
+        className={`flex min-w-0 flex-col text-start ${soldOut ? 'cursor-default' : ''}`}
       >
         {product.image_url ? (
           <Image
@@ -56,14 +66,20 @@ export function MenuProductRow({
             placeholder="blur"
             blurDataURL={BLUR_PLACEHOLDER}
             sizes="(max-width: 480px) 50vw, 33vw"
-            className="aspect-[1/0.82] w-full bg-[var(--color-surface-sunken)] object-cover"
+            className={`aspect-[1/0.82] w-full bg-[var(--color-surface-sunken)] object-cover ${
+              soldOut ? 'opacity-50 grayscale' : ''
+            }`}
           />
         ) : (
-          <div className="flex aspect-[1/0.82] w-full items-center justify-center bg-[var(--color-surface-sunken)] text-[12.5px] font-bold text-[var(--color-text-tertiary)]">
+          <div
+            className={`flex aspect-[1/0.82] w-full items-center justify-center bg-[var(--color-surface-sunken)] text-[12.5px] font-bold text-[var(--color-text-tertiary)] ${
+              soldOut ? 'opacity-50' : ''
+            }`}
+          >
             صورة الصنف
           </div>
         )}
-        <div className="flex min-w-0 flex-1 flex-col gap-1 px-3 pt-2.5">
+        <div className={`flex min-w-0 flex-1 flex-col gap-1 px-3 pt-2.5 ${soldOut ? 'opacity-60' : ''}`}>
           <h3 className="line-clamp-2 text-[14.5px] font-bold leading-[1.4]">{displayName}</h3>
           {product.description && (
             <p className="line-clamp-2 text-[12.5px] leading-[1.55] text-[var(--color-text-secondary)]">
@@ -76,7 +92,14 @@ export function MenuProductRow({
         <span className="font-mono text-[14px] font-bold tabular-nums text-[var(--color-text)]" dir="ltr">
           {formatMoney(Number(product.price), currency)}
         </span>
-        {quantity === 0 ? (
+        {soldOut ? (
+          <span
+            role="presentation"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--color-surface-sunken)] text-[var(--color-text-muted)]"
+          >
+            <X className="h-5 w-5" />
+          </span>
+        ) : quantity === 0 ? (
           <button
             type="button"
             onClick={() => onQuickAdd(product)}
