@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import { CreditCard } from 'lucide-react';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
 
@@ -256,6 +257,139 @@ export function ProjectRowActions({
               </Button>
             </div>
           </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+/** A3: Record manual payment (bank transfer / stc pay) + auto-renew subscription. */
+export function RecordPaymentButton({
+  projectId,
+  projectName,
+}: {
+  projectId: string;
+  projectName: string;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState('7');
+  const [method, setMethod] = useState<'bank-transfer' | 'stc-pay'>('bank-transfer');
+  const [receipt, setReceipt] = useState('');
+  const [notes, setNotes] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    const numAmount = Number(amount);
+    if (!Number.isFinite(numAmount) || numAmount <= 0) {
+      toast.error('المبلغ يجب أن يكون أكبر من صفر');
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch('/api/super-admin/record-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId,
+          amount: numAmount,
+          method,
+          receipt: receipt.trim() || undefined,
+          notes: notes.trim() || undefined,
+          days: 30,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'فشل تسجيل الدفع');
+        return;
+      }
+      toast.success(data.message || 'تم التسجيل والتجديد');
+      setOpen(false);
+      setReceipt('');
+      setNotes('');
+      router.refresh();
+    } catch {
+      toast.error('فشل تسجيل الدفع');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="btn btn-ghost btn-sm text-[var(--color-success)]"
+      >
+        <CreditCard className="h-3.5 w-3.5" />
+        تسجيل دفع
+      </button>
+
+      {open && (
+        <Modal onClose={() => setOpen(false)} title={`تسجيل دفع — ${projectName}`}>
+          <form onSubmit={submit} className="space-y-4">
+            <label className="flex flex-col gap-1 text-xs font-semibold">
+              المبلغ (د.ب)
+              <input
+                className="input h-9"
+                type="number"
+                inputMode="decimal"
+                min={1}
+                step="0.001"
+                required
+                dir="ltr"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-semibold">
+              طريقة الدفع
+              <select
+                className="input h-9"
+                value={method}
+                onChange={(e) => setMethod(e.target.value as 'bank-transfer' | 'stc-pay')}
+              >
+                <option value="bank-transfer">تحويل بنكي</option>
+                <option value="stc-pay">stc pay</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-semibold">
+              رقم الإيصال (اختياري)
+              <input
+                className="input h-9"
+                dir="ltr"
+                value={receipt}
+                onChange={(e) => setReceipt(e.target.value)}
+                maxLength={100}
+                placeholder="REF-12345"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-semibold">
+              ملاحظات (اختياري)
+              <textarea
+                className="input min-h-[60px] resize-y py-2"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                maxLength={300}
+                placeholder="أي ملاحظات إضافية"
+              />
+            </label>
+            <p className="text-[11px] text-[var(--color-text-tertiary)]">
+              التسجيل يُجدّد الاشتراك تلقائياً 30 يوم من الآن
+            </p>
+            <div className="flex gap-2">
+              <Button type="submit" block disabled={busy}>
+                {busy ? 'جاري…' : 'تأكيد الدفع والتجديد'}
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
+                إلغاء
+              </Button>
+            </div>
+          </form>
         </Modal>
       )}
     </>

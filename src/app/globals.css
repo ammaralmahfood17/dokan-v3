@@ -554,7 +554,7 @@
 .landing-hero { position: relative; overflow: hidden; }
 .landing-eyebrow { display: inline-flex; align-items: center; gap: 0.4rem; border: 1px solid #C7D2FE; border-radius: 999px; background: rgba(238, 242, 255, 0.72); color: var(--color-primary); padding: 0.35rem 0.7rem; font-size: 0.75rem; font-weight: 700; }
 .landing-title { font-size: clamp(2.3rem, 6vw, 4.5rem); line-height: 1.15; }
-.landing-title-accent { background: linear-gradient(120deg, var(--color-primary), #7C3AED 55%, #0F766E); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.landing-title-accent { color: var(--color-primary); }
 .landing-feature { position: relative; overflow: hidden; padding: 1.4rem; }
 .landing-feature:hover { border-color: #C7D2FE; box-shadow: 0 16px 30px rgba(15, 23, 42, 0.08); transform: translateY(-3px); }
 .landing-stat { border: 1px solid rgba(199, 210, 254, 0.72); border-radius: 1rem; background: rgba(255, 255, 255, 0.74); padding: 0.9rem 1.2rem; box-shadow: 0 8px 24px rgba(67, 56, 202, 0.06); }

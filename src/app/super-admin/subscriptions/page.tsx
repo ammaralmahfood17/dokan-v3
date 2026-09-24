@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { requireSuperAdmin } from '@/lib/super-admin';
 import { ImpersonateButton } from '@/components/impersonate-button';
-import { CreateProjectForm, ProjectRowActions } from '@/components/project-admin-actions';
+import { CreateProjectForm, ProjectRowActions, RecordPaymentButton } from '@/components/project-admin-actions';
 import type { Json } from '@/lib/database.types';
 
 /**
@@ -192,6 +192,7 @@ export default async function SuperAdminSubscriptionsPage({
                           +30 يوم
                         </button>
                       </form>
+                      <RecordPaymentButton projectId={p.id} projectName={p.name} />
                       {p.is_active && (
                         <form
                           method="post"

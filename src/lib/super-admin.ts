@@ -33,6 +33,7 @@ export type StoredSession = {
 
 export type SuperAdminAction =
   | 'subscription.renew'
+  | 'subscription.record_payment'
   | 'project.deactivate'
   | 'project.create'
   | 'project.archive'
