@@ -391,7 +391,7 @@ test('E3 deactivate → public order blocked → reactivate', async ({ page, req
 });
 
 test('E4 impersonate → support banner → end restores admin session', async ({ page }) => {
-  const { E2E_HOST } = await import('./helpers');
+  const { E2E_HOST, url } = await import('./helpers');
   await page.context().addCookies(await SA_COOKIES());
   const start = await page.request.post('/api/super-admin/impersonate', {
     data: { targetUserId: ownerId, projectId },
@@ -403,9 +403,12 @@ test('E4 impersonate → support banner → end restores admin session', async (
 
   // Mirror ImpersonateButton: the browser jar must SWAP to the target's
   // session + marker — the marker alone doesn't switch who /dashboard renders for.
+  // Cookie name must match Supabase project ref — the SSR
+  // client reads sb-<ref>-auth-token, and <ref> comes from the SUPABASE_URL.
+  const SUPABASE_REF = new URL(url).hostname.split('.')[0];
   await page.context().clearCookies();
   await page.context().addCookies([
-    { name: `sb-${E2E_HOST.split('.')[0]}-auth-token`, value: JSON.stringify(body.targetSession), domain: E2E_HOST, path: '/' },
+    { name: `sb-${SUPABASE_REF}-auth-token`, value: JSON.stringify(body.targetSession), domain: E2E_HOST, path: '/' },
     { name: 'dokan-impersonation', value: body.sessionId!, domain: E2E_HOST, path: '/' },
   ]);
   await page.goto('/dashboard');
