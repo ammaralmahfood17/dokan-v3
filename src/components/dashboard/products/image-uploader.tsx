@@ -57,7 +57,11 @@ export function ImageUploader({
 
       if (error) {
         console.error('[Image Upload]', error);
-        toast.error('فشل رفع الصورة');
+        // Debugging lesson (2026-09-24): the bucket-missing outage surfaced
+        // as a generic toast and cost an hours-long diagnosis — always echo
+        // the server's actual reason.
+        const reason = String(error.message || '').slice(0, 90);
+        toast.error(reason ? `فشل رفع الصورة: ${reason}` : 'فشل رفع الصورة');
         return;
       }
 
