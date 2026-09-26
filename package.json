@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/build-with-sentry-env.mjs",
     "start": "next start",
     "lint": "eslint . --max-warnings 0",
     "db:types": "supabase gen types typescript --linked --schema public > src/lib/database.types.ts",
