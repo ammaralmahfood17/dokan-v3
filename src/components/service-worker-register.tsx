@@ -19,8 +19,15 @@ export function ServiceWorkerRegister() {
     const showUpdateToast = () => {
       toast('🔄 تحديث متوفر', {
         description: 'نسخة جديدة من دكان جاهزة — أعد تحميل الصفحة للاستخدام',
-        // top-center covered the store header / nav on every page (UX report F5)
-        position: 'bottom-center',
+        // top-center it is. F5 moved this to bottom-center to clear the header,
+        // but on a phone the bottom of the viewport is where the money is: the
+        // cart sheet's «تأكيد الطلب» and the POS checkout button both sit in
+        // their footer, so the toast landed ON them and swallowed taps for the
+        // full 8s after every deploy (caught by pos-path: "element is visible,
+        // enabled and stable" followed by the click never landing). A toast
+        // that blocks a customer from paying is worse than one that covers
+        // navigation, and this is also the app-wide Toaster position.
+        position: 'top-center',
         duration: 8000,
         id: 'sw-update',
         action: {

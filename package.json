@@ -13,7 +13,8 @@
     "sweep:test-data": "node scripts/sweep-test-data.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:e2e:fast": "playwright test --grep-invert 'resilience|kitchen-ops'"
   },
   "engines": {
     "node": ">=22"

@@ -220,26 +220,69 @@ test('C2 products: availability toggle syncs DB + menu cache (revalidate-menu)',
 
   const jar = { Cookie: (await OWNER_COOKIES()).map((c) => `${c.name}=${c.value}`).join('; ') };
 
-  // sold out → purge via the SAME endpoint the dashboard uses → menu hides
+  // sold out → purge via the SAME endpoint the dashboard uses.
+  //
+  // The menu does NOT drop a sold-out product: the spec says so out loud
+  // (src/app/[projectSlug]/menu/[tableSlug]/page.tsx:34-36) — "sold-out items
+  // are fetched too and rendered greyed-out with a «غير متوفر» badge instead
+  // of vanishing from the menu. A shrinking menu confuses customers, and
+  // order safety is enforced server-side by createSecureOrder.
+  //
+  // So the old assertion here (product text absent from the raw HTML) encoded
+  // a contract the product deliberately does not have, and it could only pass
+  // while the unstable_cache had not been built yet. What the toggle must
+  // actually guarantee is: the DB flips, the menu re-serves, and the item comes
+  // back marked unavailable instead of orderable. The badge is client-rendered
+  // (it is not in the SSR HTML), so assert it in the browser, and assert the
+  // server-side refusal through the API.
   await admin.from('products').update({ is_available: false }).eq('id', productId);
   expect((await request.post('/api/revalidate-menu', { data: { projectId }, headers: jar })).status()).toBe(200);
-  const gone = await request.get(`/${slugA}/menu/a-1`);
-  expect(await gone.text(), 'sold-out product leaves the menu').not.toContain('شاي فحص');
 
-  // back in stock → same ritual → product returns. Vercel tag invalidation
-  // propagates over the edge network (the dashboard UI has the same delay) —
-  // poll instead of assuming instant purge, and check DB truth separately so
-  // a failure tells cache-staleness apart from a broken toggle.
+  // The customer-visible half: reload the public menu and prove the item is
+  // still listed but NOT orderable. The «غير متوفر» badge is rendered by
+  // MenuClient after hydration, so this needs the browser, not raw HTML.
+  const menu = await page.context().newPage();
+  await menu.goto(`/${slugA}/menu/a-1`, { waitUntil: 'domcontentloaded' });
+  await expect(menu.getByText('شاي فحص').first()).toBeVisible({ timeout: 30_000 });
+  await expect(menu.getByText('غير متوفر').first()).toBeVisible({ timeout: 30_000 });
+  // The add-to-cart affordance is gone, which is what actually stops ordering.
+  await expect(menu.locator('[aria-label^="إضافة شاي فحص إلى السلة"]')).toHaveCount(0);
+  await menu.close();
+
+  // The enforced half: the server refuses an order for the sold-out item even
+  // though the menu still advertises it. This is the guarantee that matters —
+  // a stale cache must never become a wrong price or an impossible order.
+  const refused = await request.post('/api/public/order', {
+    data: {
+      projectSlug: slugA,
+      tableSlug: 'a-1',
+      items: [{ productId, quantity: 1 }],
+      // A real uuid: the route REJECTS a malformed idempotency key with 400
+      // rather than ignoring it, and a 400 for the wrong reason would make
+      // this assertion meaningless.
+      clientRequestId: crypto.randomUUID(),
+    },
+  });
+  expect(refused.status(), 'a sold-out item must be refused, not sold').toBe(400);
+  expect(await refused.json()).toMatchObject({
+    error: 'منتج غير متاح أو لا ينتمي لهذا المتجر',
+  });
+
+  // back in stock → same ritual → the product becomes orderable again. Also
+  // checked in the browser: the raw-HTML poll this used was weak (the item was
+  // present in the SSR payload in BOTH states, so it proved nothing about the
+  // toggle), and the badge/add-to-cart pair is the real customer contract.
   await admin.from('products').update({ is_available: true }).eq('id', productId);
   const { data: dbNow } = await admin.from('products').select('is_available').eq('id', productId).single();
   expect(dbNow!.is_available, 'DB toggle-back').toBe(true);
   expect((await request.post('/api/revalidate-menu', { data: { projectId }, headers: jar })).status()).toBe(200);
-  await expect
-    .poll(
-      async () => (await (await request.get(`/${slugA}/menu/a-1`)).text()).includes('شاي فحص'),
-      { timeout: 40_000, intervals: [1000, 2000, 3000] }
-    )
-    .toBe(true);
+  const back = await page.context().newPage();
+  await back.goto(`/${slugA}/menu/a-1`, { waitUntil: 'domcontentloaded' });
+  await expect(back.locator('[aria-label^="إضافة شاي فحص إلى السلة"]').first()).toBeVisible({
+    timeout: 40_000,
+  });
+  await expect(back.getByText('غير متوفر').first()).toHaveCount(0);
+  await back.close();
 
   // cache purge is tenant-gated: anonymous must not purge another store's menu
   const anonPurge = await request.post('/api/revalidate-menu', { data: { projectId } });

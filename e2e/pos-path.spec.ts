@@ -107,8 +107,36 @@ test('POS: add product + addon → confirm → order lands with correct price', 
 
   // 7. Confirm the order → success toast with the order number. Measure the
   // user-visible latency (click → toast) as a perf regression check.
+  //
+  // The cart is a bottom sheet that slides up, so the confirm button is still
+  // animating when we get here — a plain click() then waits on actionability
+  // and times out with "element is not stable" every few runs. Wait for the
+  // movement to finish first; that is not a workaround, it is what a human
+  // does before tapping.
+  const confirm = page.getByRole('button', { name: 'تأكيد الطلب', exact: true });
+  await expect(confirm).toBeVisible();
+  await expect(confirm).toBeEnabled();
+  // 1.62 has no `toBeStable()` and `waitFor` rejects `state:'stable'`, so wait
+  // for the sheet's own transition to finish by watching the bounding box
+  // settle — the same thing Playwright's actionability check does internally,
+  // just awaited once instead of retried until the 90s test timeout.
+  await expect
+    .poll(
+      async () =>
+        await confirm.evaluate((el) => {
+          const a = el.getBoundingClientRect();
+          return new Promise<boolean>((resolve) => {
+            setTimeout(() => {
+              const b = el.getBoundingClientRect();
+              resolve(a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height);
+            }, 120);
+          });
+        }),
+      { timeout: 15_000, intervals: [200, 300, 500] }
+    )
+    .toBe(true);
   const t0 = Date.now();
-  await page.getByRole('button', { name: 'تأكيد الطلب', exact: true }).click();
+  await confirm.click();
   await expect(page.getByText(/تم الطلب order-/).first()).toBeVisible({ timeout: 20_000 });
   console.log(`⏱ POS order latency (confirm→toast): ${Date.now() - t0}ms`);
 
