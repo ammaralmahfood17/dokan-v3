@@ -10,7 +10,10 @@
     "db:types": "supabase gen types typescript --linked --schema public > src/lib/database.types.ts",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "sweep:test-data": "node scripts/sweep-test-data.mjs"
+    "sweep:test-data": "node scripts/sweep-test-data.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "engines": {
     "node": ">=22"
@@ -39,10 +42,12 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/web-push": "^3.6.4",
+    "@vitest/coverage-v8": "^5.0.2",
     "eslint": "^9.0.0",
     "eslint-config-next": "16.2.12",
     "tailwindcss": "^4.0.9",
-    "typescript": "^5.5.4"
+    "typescript": "^5.5.4",
+    "vitest": "^5.0.2"
   },
   "overrides": {
     "next": {

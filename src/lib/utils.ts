@@ -76,7 +76,12 @@ export function currencyDecimals(currency: string): number {
 export function money(value: number, decimals = 3): number {
   if (!Number.isFinite(value)) return 0;
   const factor = 10 ** decimals;
-  return Math.round((value + Number.EPSILON) * factor) / factor;
+  const rounded = Math.round((value + Number.EPSILON) * factor) / factor;
+  // A tiny negative amount (-0.0001) rounds to NEGATIVE ZERO, and
+  // `Intl.NumberFormat` renders that as "-0.000 BHD" on a customer receipt.
+  // `rounded || 0` normalises -0 to 0 while leaving every other value alone
+  // (including real negatives, which are legitimate refunds).
+  return rounded || 0;
 }
 
 // AR-1: locale عربي لكل عملة خليجية — الأرقام تُثبَّت لاتينية (0-9) عبر

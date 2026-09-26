@@ -66,6 +66,14 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Unit tests, BEFORE the build: a logic regression should fail in seconds
+      # here rather than after a full Next build. `vitest run` exits non-zero on
+      # a single failure, so there is no "expected failures" escape hatch here.
+      # This suite is deliberately scoped to src/lib pure helpers — it never
+      # touches the network, so it is safe on every push.
+      - name: Unit tests
+        run: npm test
+
       - name: Build
         run: npm run build
 
