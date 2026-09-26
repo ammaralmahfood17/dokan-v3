@@ -56,8 +56,13 @@ let cacheProvider: CacheProvider | null = null;
 export function getCacheProvider(): CacheProvider {
   if (!cacheProvider) {
     if (process.env.CACHE_PROVIDER === 'upstash') {
-      // TODO: add UpstashRedisProvider (same Redis commands — HGETALL/HSET/
-      // HINCRBY/EXPIRE) when migrating off Vercel. Swap = this line + env var.
+      // Fail closed on purpose. CACHE_PROVIDER=upstash is a STATED INTENT to
+      // move off Vercel KV, and no UpstashRedisProvider exists yet (the Redis
+      // commands are compatible: HGETALL/HSET/HINCRBY/EXPIRE, so wiring it is
+      // one class + this line). Throwing here means a half-finished migration
+      // crashes loudly at boot instead of silently continuing to write cache
+      // entries to Vercel KV while the operator believes the cutover happened.
+      // The env var is unset in production, so this path is dormant today.
       throw new Error('CACHE_PROVIDER=upstash is not wired up yet');
     }
     cacheProvider = new VercelKVProvider();

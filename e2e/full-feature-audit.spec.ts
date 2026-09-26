@@ -460,8 +460,11 @@ test('F2 cross-tenant: stranger cannot place POS orders in store A', async ({ re
 });
 
 test('F3 anon JWT rejected on owner-only APIs', async ({ request }) => {
-  // renew validates the query projectId BEFORE auth — send a well-formed one
-  // so the assertion exercises the 401 wall, not the 400 param guard.
+  // Every one of these routes authenticates BEFORE validating its input, so
+  // an anonymous caller gets 401 regardless of what it sends — the well-formed
+  // projectId below is no longer required to reach the auth wall, it just
+  // proves the ordering. If one of these ever answers 400 again, the auth
+  // check has been moved back below input validation.
   for (const path of ['/api/onboarding/project', '/api/pos/cancel', `/api/super-admin/renew?projectId=${projectId}`]) {
     const res = await request.post(path, { data: {} });
     expect(res.status(), path).toBeLessThan(500);
