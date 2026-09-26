@@ -76,11 +76,20 @@ export function OrdersClient({
   const isToday = dateKey === toDateKey(new Date());
   const mountedRef = useRef(false);
 
+  // FIX-PAGE-001: how many rows the merchant has actually loaded. A plain
+  // refresh used to re-query only .range(0,49) and REPLACE state, so every
+  // realtime event (and the 60s heartbeat) silently threw away pages 2+ — the
+  // merchant who scrolled was yanked back to the newest 50 orders. Track the
+  // loaded span in a ref and re-query the same width on refresh.
+  const loadedCountRef = useRef(initialOrders.length);
+
   const refresh = useCallback(
     async (key?: string, append = false) => {
       const target = key ?? dateKey;
       const { start, end } = dayRange(target);
       const supabase = createClient();
+      // A different day starts fresh; the same day re-reads what was loaded.
+      const span = key && key !== dateKey ? 50 : Math.max(50, loadedCountRef.current);
       const { data } = await supabase
         .from('orders')
         .select('*, tables(number, slug), order_items(*)')
@@ -89,8 +98,9 @@ export function OrdersClient({
         .gte('created_at', start.toISOString())
         .lt('created_at', end.toISOString())
         .order('created_at', { ascending: false })
-        .range(0, 49);
+        .range(0, span - 1);
       if (data) {
+        loadedCountRef.current = data.length;
         setOrders((prev) => {
           // When appending, merge by id (realtime may have added rows).
           if (!append) return data as unknown as OrderRow[];
@@ -98,8 +108,8 @@ export function OrdersClient({
           for (const o of data as unknown as OrderRow[]) byId.set(o.id, o);
           return [...byId.values()];
         });
-        // Fewer than 50 rows → no more pages for this day.
-        setHasMore(data.length === 50);
+        // A full page came back → there may be more.
+        setHasMore(data.length >= span);
       }
     },
     [projectId, dateKey]
@@ -122,7 +132,9 @@ export function OrdersClient({
     if (data) {
       const byId = new Map(orders.map((o) => [o.id, o]));
       for (const o of data as unknown as OrderRow[]) byId.set(o.id, o);
-      setOrders([...byId.values()]);
+      const merged = [...byId.values()];
+      loadedCountRef.current = merged.length;
+      setOrders(merged);
       setHasMore(data.length === 50);
     }
     setLoadingMore(false);
