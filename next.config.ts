@@ -83,12 +83,31 @@ const nextConfig: NextConfig = {
   },
 };
 
-// Sentry wraps the config; harmless without SENTRY_DSN (SDK no-ops).
-// Auth tokens: no sentry.authToken set → CI/source-map upload disabled until
-// the user adds Sentry credentials in the dashboard.
+// Sentry + source maps.
+//
+// Before 2026-09-26 no `authToken` was set, so the SDK built the maps and then
+// silently dropped them: production stack traces were minified frame numbers
+// (app/.../page.js:1:48213) with no file or line. Uploading requires all three
+// of SENTRY_AUTH_TOKEN + SENTRY_ORG + SENTRY_PROJECT (see getBuildPluginOptions.js
+// — authToken is passed straight through and a missing one fails the upload).
+//
+// The three are read from the environment, never hardcoded, so the token stays
+// in Vercel's env and out of git. SENTRY_DSN alone is NOT enough.
 export default withSentryConfig(nextConfig, {
   org: process.env.SENTRY_ORG,
   project: process.env.SENTRY_PROJECT,
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  // `next build` is not the after-production-compile hook, so upload runs.
+  sourcemaps: {
+    // Maps are uploaded to Sentry then deleted from .next, so no bundle ever
+    // serves a `//# sourceMappingURL` back to a browser — that would let anyone
+    // read the original source in devtools.
+    deleteSourcemapsAfterUpload: true,
+  },
+  // Never let a Sentry outage or a missing token fail the production build.
+  errorHandler: (error) => {
+    console.warn('[sentry] source map upload failed:', error);
+  },
   silent: !process.env.CI,
   telemetry: false,
   widenClientFileUpload: true,

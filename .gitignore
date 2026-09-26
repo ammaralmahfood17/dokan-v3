@@ -30,6 +30,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+# Sentry CLI auth file — holds a plaintext org auth token. Must never be committed.
+.sentryclirc
 
 # supabase
 supabase/.branches
