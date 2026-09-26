@@ -177,6 +177,15 @@ export function OrdersClient({
       }
     };
 
+    // Safety net (2026-09-25): the 30s poll below only STARTS on a
+    // CHANNEL_ERROR/CLOSED callback. A socket that connects and then stalls
+    // silently fires neither, so the page stayed stale until a manual
+    // refresh. This heartbeat runs regardless of socket health — realtime
+    // normally wins the race by ~1s, so this is just insurance.
+    const heartbeat = setInterval(() => {
+      if (isToday) void refresh();
+    }, 60_000);
+
     const channel = supabase
       .channel(`orders-${projectId}`)
       .on(
@@ -214,6 +223,7 @@ export function OrdersClient({
     return () => {
       channelActive = false;
       if (refreshTimer) clearTimeout(refreshTimer);
+      clearInterval(heartbeat);
       stopPoll();
       void supabase.removeChannel(channel);
     };

@@ -15,6 +15,7 @@ import { KpiCards } from '@/components/dashboard/kpi-cards';
 import { ChecklistSection } from '@/components/dashboard/checklist';
 import { HourlySalesChart } from '@/components/dashboard/hourly-sales-chart';
 import { RecentOrdersTable } from '@/components/dashboard/recent-orders-table';
+import { LiveRefresh } from '@/components/dashboard/live-refresh';
 import { WeeklySalesChart } from '@/components/dashboard/weekly-sales-chart';
 import { TopProducts } from '@/components/dashboard/top-products';
 
@@ -185,6 +186,10 @@ export default async function DashboardPage() {
 
   return (
     <div className="page">
+      {/* Live-update safety net: realtime on orders + a 60s heartbeat. Without
+          this the home screen froze at page-load data and the merchant had to
+          hit refresh to see new orders. Renders nothing. */}
+      <LiveRefresh projectId={ctx.project.id} />
       {/* Topbar — greeting + today chip */}
       <div className="mb-7 flex items-center justify-between gap-3">
         <div>
