@@ -56,6 +56,19 @@ async function countOrdersForKey(key: string): Promise<number> {
   return count ?? 0;
 }
 
+async function countOrders(projectId: string): Promise<number | null> {
+  // head:true returns NO rows, so `data` is null and the count arrives as
+  // `count`. Reading `data.length` here (the obvious mistake) is always 0 or a
+  // TypeError — the first draft of this spec did exactly that and compared
+  // null against a number, which failed for a reason that had nothing to do with
+  // the behaviour under test.
+  const { count } = await admin
+    .from('orders')
+    .select('id', { count: 'exact', head: true })
+    .eq('project_id', projectId);
+  return count;
+}
+
 test.beforeAll(async () => {
   const user = await createTestUser(email);
   userId = user.id;
@@ -149,10 +162,7 @@ test('omitting clientRequestId keeps working (internal callers are unaffected)',
 });
 
 test('a malformed clientRequestId is a clean 400, not a 500', async () => {
-  const { data: beforeRows } = await admin
-    .from('orders')
-    .select('id', { count: 'exact', head: true })
-    .eq('project_id', projectId);
+  const beforeRows = await countOrders(projectId!);
 
   const res = await fetch(`${E2E_BASE_URL}/api/public/order`, {
     method: 'POST',
@@ -169,9 +179,5 @@ test('a malformed clientRequestId is a clean 400, not a 500', async () => {
   // The rejection must be total: a rejected key must not have created a
   // partial order. Counted with a plain aggregate rather than filtering on the
   // bad literal, which is not even a uuid.
-  const { count: afterRows } = await admin
-    .from('orders')
-    .select('id', { count: 'exact', head: true })
-    .eq('project_id', projectId);
-  expect(afterRows).toBe(beforeRows);
+  expect(await countOrders(projectId!)).toBe(beforeRows);
 });
