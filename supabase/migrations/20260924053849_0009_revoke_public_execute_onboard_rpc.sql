@@ -1,0 +1,27 @@
+-- ============================================================================
+-- 20260924053849 — 0009_revoke_public_execute_onboard_rpc  (ADOPTED, no-op)
+-- ============================================================================
+--
+-- Second half of the same hand-applied pair; see
+-- 20260924053759_0008_close_onboard_rpc_anon_leak.sql for the full story.
+-- Adopted (no SQL) so the CLI and the "Supabase Preview" CI check stop
+-- reporting the remote history as unreconcilable.
+--
+-- This one closed the `PUBLIC` pseudo-role grant, which is the default for
+-- every function created before the hardening pass. Revoking from `anon`
+-- (the previous file) was not sufficient: `anon` is a MEMBER of `PUBLIC`, so
+-- a `GRANT ... TO PUBLIC` would have re-exposed the function to anonymous
+-- callers regardless of the explicit revoke. Both were needed, in this order:
+--   REVOKE EXECUTE ON FUNCTION ... FROM PUBLIC;   -- close the default grant
+--   REVOKE EXECUTE ON FUNCTION ... FROM anon;     -- and the explicit one
+--
+-- `PUBLIC` is why this class of bug survives a naive audit: reading
+-- information_schema.role_routine_grants shows a row for anon and revoking
+-- that role changes nothing, because the effective privilege comes from
+-- PUBLIC. Always check the `proacl` array, or
+--   has_function_privilege('<role>', '<fn>', 'EXECUTE')
+-- which resolves membership for you.
+--
+-- Verified live 2026-09-26 (both false):
+--   has_function_privilege('anon',          'onboard_project_transactional','EXECUTE')
+--   has_function_privilege('authenticated', 'onboard_project_transactional','EXECUTE')

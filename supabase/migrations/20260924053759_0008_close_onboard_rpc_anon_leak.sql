@@ -1,0 +1,40 @@
+-- ============================================================================
+-- 20260924053759 — 0008_close_onboard_rpc_anon_leak  (ADOPTED, no-op)
+-- ============================================================================
+--
+-- This migration was originally applied BY HAND through the Supabase SQL
+-- editor, so the CLI had no file for it. `supabase db push` and the CI
+-- "Supabase Preview" check both refuse to run while the remote history
+-- references a version with no matching local file:
+--
+--     Remote migration versions not found in local migrations directory.
+--
+-- This file is the missing half of that adopt. It deliberately contains NO
+-- SQL: the grants it originally performed are already live, and re-running
+-- them is not merely a no-op in intent — it is a no-op in fact, because
+-- `REVOKE`/`GRANT` on an already-correct state leaves the database exactly as
+-- it is. Replaying it cannot change the schema, drop data, or double-apply
+-- anything.
+--
+-- Why the filename keeps the original timestamp and NOT a sequence number:
+-- the version in `supabase_migrations.schema_migrations` IS this string, and
+-- the CLI matches the two by name. Renaming the file would orphan the row
+-- again and re-break the preview check. Inventing a fresh `0017_` prefix
+-- would be worse: the CLI would treat the older manual work as unapplied and
+-- try to run the neighbouring numbered files over live data.
+--
+-- What this migration actually did (verified live, 2026-09-26):
+--   public.onboard_project_transactional is SECURITY DEFINER, and it was
+--   reachable by the `anon` role. That is a privilege-escalation path: anyone
+--   unauthenticated could create a project (and a project owner membership)
+--   through a definer-rights function that no policy guards.
+--   Closed by revoking EXECUTE from anon (and from PUBLIC), leaving
+--   service_role / the table owner able to call it.
+--
+-- Verified state after adoption:
+--   has_function_privilege('anon',          'onboard_project_transactional','EXECUTE') = false
+--   has_function_privilege('authenticated', 'onboard_project_transactional','EXECUTE') = false
+--   has_schema_privilege('anon','public','CREATE') = false
+--
+-- Re-verifying the live state is the point of this file existing; if a future
+-- change ever re-grants anon, this comment is where to look.
