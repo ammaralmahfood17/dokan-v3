@@ -93,12 +93,24 @@ async function resolveUserId(email: string): Promise<string | null> {
   return data.users.find((u) => u.email === email)?.id ?? null;
 }
 
-/** Full cleanup: orders → tables → products → staff → project → auth user. */
+/** Full cleanup: orders → tables → products → staff → project → auth user.
+ *
+ *  2026-09-26: the audit found this list was missing every project-scoped table
+ *  that a newer spec can create, so a failing run left real rows in PRODUCTION
+ *  with nothing to ever remove them. `service_requests` is the one that matters:
+ *  the public waiter/bill endpoints write it, so any test of those flows leaked
+ *  a permanent row per call, and the retention sweep in 0016 does not list it
+ *  either. `order_sequences` / `daily_order_counters` are created per project by
+ *  the order-numbering path, so they accumulate too.
+ *
+ *  Deletes run children-first (order_items before orders) and the project row
+ *  last, since several of these tables reference projects. Each delete is
+ *  project-scoped, so cleanup can never touch a real store — the caller must
+ *  pass an email that resolves to a project it created. */
 export async function cleanupTestUser(email: string): Promise<void> {
   const userId = await resolveUserId(email);
   const projectId = await findProjectId(email);
   if (projectId) {
-    await admin.from('order_items').delete().eq('order_id', '00000000-0000-0000-0000-000000000000'); // no-op guard
     const { data: orders } = await admin
       .from('orders')
       .select('id')
@@ -106,12 +118,26 @@ export async function cleanupTestUser(email: string): Promise<void> {
     for (const o of orders ?? []) {
       await admin.from('order_items').delete().eq('order_id', o.id);
     }
+    await admin.from('service_requests').delete().eq('project_id', projectId);
+    await admin.from('order_audit_logs').delete().eq('project_id', projectId);
+    await admin.from('daily_order_counters').delete().eq('project_id', projectId);
+    await admin.from('order_sequences').delete().eq('project_id', projectId);
+    // impersonation_sessions is keyed by TARGET_PROJECT_ID, not project_id, and
+    // it also CASCADEs from auth.users, so it is covered by the user delete
+    // below. A `.eq('project_id', …)` here would throw and abort the rest.
     await admin.from('orders').delete().eq('project_id', projectId);
+    await admin.from('push_subscriptions').delete().eq('project_id', projectId);
+    await admin.from('subscription_payments').delete().eq('project_id', projectId);
     await admin.from('tables').delete().eq('project_id', projectId);
-    await admin.from('product_addons').delete().eq('project_id', projectId);
+    // product_addons has NO project_id (it hangs off product_id), and the old
+    // `.eq('project_id', …)` here was a 400 that quietly did nothing. It still
+    // cleaned up in the end, because product_addons.product_id is ON DELETE
+    // CASCADE from products — so the line is dropped rather than "fixed": one
+    // fewer misleading statement, and the cascade is the real guarantee.
     await admin.from('products').delete().eq('project_id', projectId);
     await admin.from('categories').delete().eq('project_id', projectId);
     await admin.from('staff_members').delete().eq('project_id', projectId);
+    await admin.from('telegram_links').delete().eq('project_id', projectId);
     await admin.from('projects').delete().eq('id', projectId);
   }
   await admin.from('super_admins').delete().eq('user_id', userId);
