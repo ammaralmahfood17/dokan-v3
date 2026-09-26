@@ -99,8 +99,31 @@ jobs:
           node-version: 20
           cache: 'npm'
       - run: npm ci
+
+      # e2e/helpers.ts reads .env.local at import time (module scope) and throws
+      # on the missing keys — so even `playwright test --list` needs them. Same
+      # placeholders as the build job; nothing real is exposed and no request is
+      # ever made to a Supabase project.
+      - name: Write env placeholders for module load
+        run: |
+          cat > .env.local <<'EOF'
+          NEXT_PUBLIC_SUPABASE_URL=https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY=ci-placeholder-anon-key
+          SUPABASE_SERVICE_ROLE_KEY=ci-placeholder-service-role
+          EOF
+
       - name: List Playwright specs
-        run: npx playwright test --list
+        # Must actually list tests: an env problem makes playwright exit with
+        # "No tests found" and a non-zero code, which is exactly how the first
+        # CI run failed. Assert the count so a silently-empty suite is caught.
+        run: |
+          npx playwright test --list | tee /tmp/specs.txt
+          grep -qE "^Total: [1-9][0-9]* tests?" /tmp/specs.txt || {
+            echo "::error::Playwright listed no tests — suite is broken or unconfigured"
+            exit 1
+          }
+          grep -c "^  \[" /tmp/specs.txt | xargs -I{} echo "e2e specs discovered: {}"
+
       - name: Explain why e2e does not run here
         run: |
           echo "::notice::e2e/helpers.ts targets dokanstore.xyz (production) and"
