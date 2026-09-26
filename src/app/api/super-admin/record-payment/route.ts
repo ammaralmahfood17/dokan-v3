@@ -16,6 +16,26 @@ import { logSuperAdminAction } from '@/lib/super-admin';
  */
 export async function POST(request: NextRequest) {
   try {
+    // Auth BEFORE input validation: an unauthenticated caller must not be able
+    // to learn the request shape (or that a field is missing) from a 400 that
+    // arrives ahead of the 401. Everything below is inside this try, so a
+    // throwing getUser() still lands in the 500 handler with Sentry attached.
+    const userClient = await createClient();
+    const { data: { user } } = await userClient.auth.getUser();
+    if (!user) return NextResponse.json({ error: 'غير مصرح' }, { status: 401 });
+
+    const { data: isAdmin } = await userClient.rpc('is_super_admin');
+    if (!isAdmin) return NextResponse.json({ error: 'غير مصرح' }, { status: 403 });
+
+    // Defence in depth: this route is gated by is_super_admin() and the
+    // underlying RPC is service_role-only, so the limit is not closing a live
+    // bypass — it stops a stolen admin session from hammering the endpoint
+    // (each call costs a getUser() + an is_super_admin() RPC before the work
+    // is even rejected). Keyed on the admin's user id, not their IP, so a shared
+    // office connection can't lock out a real admin.
+    const throttled = await limitSuperAdmin(request, user.id, 'record-payment');
+    if (throttled) return throttled;
+
     const body = await request.json().catch(() => null);
     if (!body) {
       return NextResponse.json({ error: 'محتوى الطلب غير صالح' }, { status: 400 });
@@ -45,23 +65,6 @@ export async function POST(request: NextRequest) {
     }
 
     const renewalDays = typeof days === 'number' && days > 0 && days <= 365 ? days : 30;
-
-    // Auth + super-admin check
-    const userClient = await createClient();
-    const { data: { user } } = await userClient.auth.getUser();
-    if (!user) return NextResponse.json({ error: 'غير مصرح' }, { status: 401 });
-
-    const { data: isAdmin } = await userClient.rpc('is_super_admin');
-    if (!isAdmin) return NextResponse.json({ error: 'غير مصرح' }, { status: 403 });
-
-    // Defence in depth: this route is gated by is_super_admin() and the
-    // underlying RPC is service_role-only, so the limit is not closing a live
-    // bypass — it stops a stolen admin session from hammering the endpoint
-    // (each call costs a getUser() + an is_super_admin() RPC before the work
-    // is even rejected). Keyed on the admin's user id, not their IP, so a shared
-    // office connection can't lock out a real admin.
-    const throttled = await limitSuperAdmin(request, user.id, 'record-payment');
-    if (throttled) return throttled;
 
     // Verify project exists
     const admin = createAdminClient();

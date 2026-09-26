@@ -14,11 +14,10 @@ import { logSuperAdminAction } from '@/lib/super-admin';
  */
 export async function POST(request: NextRequest) {
   try {
-    const projectId = request.nextUrl.searchParams.get('projectId');
-    if (!projectId) {
-      return NextResponse.json({ error: 'projectId مطلوب' }, { status: 400 });
-    }
-
+    // Auth BEFORE input validation: an unauthenticated caller must not be able
+    // to learn the request shape (or that a field is missing) from a 400 that
+    // arrives ahead of the 401. Everything below is inside this try, so a
+    // throwing getUser() still lands in the 500 handler with Sentry attached.
     const userClient = await createClient();
     const {
       data: { user },
@@ -36,6 +35,11 @@ export async function POST(request: NextRequest) {
     // office connection can't lock out a real admin.
     const throttled = await limitSuperAdmin(request, user.id, 'renew');
     if (throttled) return throttled;
+
+    const projectId = request.nextUrl.searchParams.get('projectId');
+    if (!projectId) {
+      return NextResponse.json({ error: 'projectId مطلوب' }, { status: 400 });
+    }
 
     const admin = createAdminClient();
     const { data: project } = await admin
