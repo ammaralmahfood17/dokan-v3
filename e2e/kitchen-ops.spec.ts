@@ -197,6 +197,26 @@ function column(page: Page, label: string) {
   return page.getByRole('region', { name: label });
 }
 
+/**
+ * Assert a KDS column does not hold `text`.
+ *
+ * The board renders a column only while it has tickets, so as a table empties
+ * out the region disappears entirely — and `expect(locator).not.toContainText()`
+ * on a locator that matches NOTHING fails with "element(s) not found" instead of
+ * passing. A plain negative assertion is therefore unsatisfiable on a nearly
+ * empty board: it either passes for the wrong reason while the column is full,
+ * or fails for the wrong reason once the column is gone.
+ *
+ * The honest form is "absent, or present without our text" — which is what
+ * this asserts. Pair it with a positive locator assertion (`toHaveCount(0)` on
+ * the ticket itself, or a DB poll) so the step is still proving something.
+ */
+async function columnLacks(page: Page, label: string, text: string): Promise<void> {
+  const region = column(page, label);
+  if ((await region.count()) === 0) return; // column not rendered: it holds nothing
+  await expect(region).not.toContainText(text);
+}
+
 /* ------------------------------------------------------------------ *
  * SETUP
  * ------------------------------------------------------------------ */
@@ -353,8 +373,8 @@ test('kitchen board: ticket listed in the جديد column with both product line
 
   // Column state: sits in 'جديد' with the start button, nowhere else.
   await expect(column(page, COL_NEW)).toContainText(productAName, { timeout: 20_000 });
-  await expect(column(page, COL_PREPARING)).not.toContainText(productAName);
-  await expect(column(page, COL_READY)).not.toContainText(productAName);
+  await columnLacks(page, COL_PREPARING, productAName);
+  await columnLacks(page, COL_READY, productAName);
   await expect(card.getByRole('button', { name: BTN_START, exact: true })).toBeVisible();
 });
 
@@ -377,7 +397,7 @@ test('بدء التحضير: click the real button → orders + BOTH order_items
 
   // Board followed: the ticket is now in 'قيد التحضير' offering the next action.
   await expect(column(page, COL_PREPARING)).toContainText(productAName, { timeout: 20_000 });
-  await expect(column(page, COL_NEW)).not.toContainText(productAName);
+  await columnLacks(page, COL_NEW, productAName);
   await expect(card.getByRole('button', { name: BTN_READY, exact: true })).toBeVisible();
   await expect(card.getByRole('button', { name: BTN_START, exact: true })).toHaveCount(0);
 });
@@ -400,7 +420,7 @@ test('جاهز للتسليم: every item ready AND the parent order is ready', 
     .toEqual({ status: 'ready', items: ['ready', 'ready'] });
 
   await expect(column(page, COL_READY)).toContainText(productAName, { timeout: 20_000 });
-  await expect(column(page, COL_PREPARING)).not.toContainText(productAName);
+  await columnLacks(page, COL_PREPARING, productAName);
   await expect(card.getByRole('button', { name: BTN_DELIVER, exact: true })).toBeVisible();
 });
 
@@ -421,10 +441,15 @@ test('تم التسليم ✓: the ticket leaves the board and the DB says deliv
     .toEqual({ status: 'delivered', items: ['ready', 'ready'] });
 
   // The KDS board only renders pending/preparing/ready — a delivered ticket
-  // is gone from every column.
+  // is gone from every column. Line 425 is the real proof (the ticket element
+  // itself is gone). The two column assertions below are deliberately
+  // "either absent, or present but without our product": once the last ticket
+  // leaves, the column is not rendered at all, and `not.toContainText` on a
+  // NON-EXISTENT locator fails rather than passes, which is what this spec used
+  // to do on an empty board.
   await expect(ticket(page, orderANumber)).toHaveCount(0, { timeout: 20_000 });
-  await expect(column(page, COL_READY)).not.toContainText(productAName);
-  await expect(column(page, COL_NEW)).not.toContainText(productAName);
+  await columnLacks(page, COL_READY, productAName);
+  await columnLacks(page, COL_NEW, productAName);
   await expect(page.getByText(BTN_START, { exact: true })).toHaveCount(0);
 });
 
@@ -476,7 +501,7 @@ test('cancel: POST /api/pos/cancel → cancelled, and a stale advance is rejecte
   // And the board drops it: neither pending nor preparing nor ready.
   await openKitchen(page);
   await expect(ticket(page, orderBNumber)).toHaveCount(0, { timeout: 20_000 });
-  await expect(column(page, COL_NEW)).not.toContainText(productBName);
+  await columnLacks(page, COL_NEW, productBName);
   await expect(page.getByText(BTN_START, { exact: true })).toHaveCount(0);
 });
 

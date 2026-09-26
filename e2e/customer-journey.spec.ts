@@ -262,10 +262,13 @@ test('1. scanning the table QR opens the store menu with the seeded products', a
 
   // Store identity in the header.
   await expect(cust.getByRole('heading', { name: storeName, level: 1 })).toBeVisible({ timeout: 25_000 });
-  // «طاولة» + padStart(2,'0') in a dir="ltr" span → «طاولة 01».
+  // «طاولة» + padStart(2,'0') in a dir="ltr" span → «طاولة 01». Both live in
+  // the SAME element (menu-client.tsx: `{label} <span dir="ltr">{n}</span>`), so
+  // there is no element whose text is exactly «طاولة» — matching it alone made
+  // this assertion unsatisfiable. Assert the joined text instead.
   const tableChip = cust.locator('span[dir="ltr"]').filter({ hasText: /^0?1$/ }).first();
   await expect(tableChip).toBeVisible();
-  await expect(cust.getByText('طاولة', { exact: true })).toBeVisible();
+  await expect(cust.getByText(/^طاولة\s*0?1$/)).toBeVisible();
   // Category heading + both products are on the page.
   await expect(cust.getByText(categoryName).first()).toBeVisible();
   await expect(cust.getByText(addonProductName).first()).toBeVisible();
@@ -315,8 +318,14 @@ test('2. two different products (one with an addon) → qty controls → total =
   const cartBar = cust.getByRole('button').filter({ hasText: 'إتمام الطلب' });
   await expect(cartBar).toBeVisible({ timeout: 15_000 });
   await expect(cartBar.getByText('السلة')).toBeVisible();
-  const barText = (await cartBar.textContent()) ?? '';
-  expect(parseMoney(barText), 'floating cart bar total').toBeCloseTo(addonUnit() + plainPrice, 3);
+  // Read the money span itself, NOT the button's whole textContent: the bar
+  // also contains the item count («السلة 2»), and parseMoney strips every
+  // non-numeric character, so «السلة 2 … 2.250 BHD» collapsed to 22.250 and
+  // produced a 20.000 phantom. The total is the span marked dir="ltr"
+  // (menu-client.tsx:701) that is NOT the cart badge/count.
+  const barTotal = cartBar.locator('span[dir="ltr"]').last();
+  const barText = (await barTotal.textContent()) ?? '';
+  expect(parseMoney(barText), `floating cart bar total (got «${barText}»)`).toBeCloseTo(addonUnit() + plainPrice, 3);
   // A later add only toasts — the sheet must NOT steal focus back.
   await expect(cust.getByRole('dialog', { name: 'سلتك' })).toHaveCount(0);
 
@@ -525,11 +534,17 @@ test('5. a sold-out product cannot be added to the cart and orders for it 400 (n
   await expect(soldOutCard).toHaveAttribute('aria-disabled', 'true');
 
   // Clicking the sold-out card does nothing at all — no cart, no new order.
+  //
+  // The card is `aria-disabled`, not `disabled`: it must stay reachable for
+  // screen readers, and Playwright's actionability check treats an
+  // aria-disabled target as "not enabled" and retries forever. So we cannot
+  // `click()` it — the honest equivalent of a user's tap is a forced click at
+  // the element's own coordinates, which still dispatches a real event to it.
   const ordersBeforeClick = await admin
     .from('orders')
     .select('id', { count: 'exact', head: true })
     .eq('project_id', projectId);
-  await soldOutCard.click();
+  await soldOutCard.click({ force: true });
   await expect(menu2.getByRole('button').filter({ hasText: 'إتمام الطلب' })).toHaveCount(0);
   await expect(menu2.getByRole('dialog', { name: 'سلتك' })).toHaveCount(0);
   const ordersAfterClick = await admin
