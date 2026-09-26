@@ -88,8 +88,9 @@ const nextConfig: NextConfig = {
 // Before 2026-09-26 no `authToken` was set, so the SDK built the maps and then
 // silently dropped them: production stack traces were minified frame numbers
 // (app/.../page.js:1:48213) with no file or line. Uploading requires all three
-// of SENTRY_AUTH_TOKEN + SENTRY_ORG + SENTRY_PROJECT (see getBuildPluginOptions.js
-// — authToken is passed straight through and a missing one fails the upload).
+// of SENTRY_AUTH_TOKEN + SENTRY_ORG + SENTRY_PROJECT — the SDK passes the
+// `authToken` option straight through to sentry-cli, and without it the upload
+// has nowhere to send the maps.
 //
 // The three are read from the environment, never hardcoded, so the token stays
 // in Vercel's env and out of git. SENTRY_DSN alone is NOT enough.
@@ -108,7 +109,13 @@ export default withSentryConfig(nextConfig, {
   errorHandler: (error) => {
     console.warn('[sentry] source map upload failed:', error);
   },
-  silent: !process.env.CI,
+  // A failed upload is what makes stack traces useless, and `silent: true`
+  // swallowed it: the build printed nothing, exited 0, and the only symptom was
+  // leftover .map files nobody was looking at. Keep the plugin talking on every
+  // machine so a regression shows up in the build log instead of a week later in
+  // Sentry. `SENTRY_LOG_LEVEL` can still lower or raise the detail level, and the
+  // errorHandler above keeps an actual failure non-fatal for the build.
+  silent: false,
   telemetry: false,
   widenClientFileUpload: true,
 });

@@ -5,19 +5,24 @@
 // `next build` spawns. Next loads .env.local for the APPLICATION, but that does
 // not put SENTRY_ORG / SENTRY_PROJECT / SENTRY_AUTH_TOKEN into the environment
 // of the build process's children. Locally the upload therefore silently did
-// nothing: the build "succeeded", and 467 .map files were still sitting in
-// .next afterwards (deleteSourcemapsAfterUpload: true means they only vanish on
-// a SUCCESSFUL upload).
-//
-// On Vercel the env vars are real process environment variables, so production
-// was never affected — this is a local-dev/CI-only gap. But it is exactly the
-// kind of gap that hides until the one deploy you cannot reproduce, so we close
-// it here instead of documenting it.
+// nothing: the build "succeeded" and printed no Sentry output at all, because
+// the plugin was also configured with `silent: !process.env.CI` (now removed
+// from next.config.ts). Vercel was never affected — there the vars are real
+// process env — so this was purely a local/CI blind spot, and exactly the kind
+// that hides until the one deploy you cannot reproduce.
 //
 // It reads .env.local WITHOUT a dependency (no dotenv in the tree), honours
 // existing environment variables (CI/Vercel must win — never let a stale local
 // file override a real secret), and is a no-op when the vars are absent, so it
 // costs nothing on a machine that has no Sentry project.
+//
+// How to tell an upload actually happened (do not trust the exit code):
+//   npm run build | grep "Uploaded files to Sentry"
+// The build prints a full per-file report. One warning is expected and benign:
+//   could not determine a source map reference for ~/0cz1d0mv5g_q7.js
+// That file is Next's own nomodule polyfill, copied verbatim from
+// next/dist/build/polyfills/polyfill-nomodule.js, so it has no map to upload
+// and no map to lose. Everything else (~770 entries) uploads.
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
