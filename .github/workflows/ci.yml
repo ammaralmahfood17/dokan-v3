@@ -1,0 +1,109 @@
+name: CI
+
+# Why this exists: dokan-v3 auto-deploys `master` straight to Vercel, and until
+# 2026-09-26 there was NO automated verification at all — a broken commit shipped
+# to production silently. This is the gate that prevents a repeat.
+#
+# Safety rule that shapes this file: the Playwright suite is NOT run here.
+# e2e/helpers.ts targets dokanstore.xyz (production) by default and creates
+# real users, real projects and real orders before cleaning up. Running it
+# automatically on every push would write into the live merchant's database.
+# E2E stays a manual, deliberate step (see the comment in `e2e/README`).
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+# Never let two runs compete for the same deploy preview.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Typecheck · Lint · Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          # npm ci (not npm install) so the lockfile is authoritative — this is
+          # the same fix applied to vercel.json.
+          cache: 'npm'
+
+      - name: Install (npm ci)
+        run: npm ci
+
+      # Placeholder env for the build only. No real secret is needed and none is
+      # exposed: `NEXT_PUBLIC_*` values are inlined at build time, so the build
+      # must be given *something*, but nothing here reaches production. The
+      # service-role check below passes on the literal string `sbp_`-free value.
+      # Real deployment env lives in Vercel, never in the repo.
+      - name: Write build-time env placeholders
+        run: |
+          cat > .env.local <<'EOF'
+          NEXT_PUBLIC_SITE_URL=https://dokanstore.xyz
+          NEXT_PUBLIC_SUPABASE_URL=https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY=ci-placeholder-anon-key
+          SUPABASE_SERVICE_ROLE_KEY=ci-placeholder-service-role
+          EOF
+
+      # The three gates the project already used manually. `lint` runs with
+      # --max-warnings 0, so a new warning fails the build.
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      # The service-role key must never reach a client bundle. Cheap, and it
+      # catches the single worst thing that could be committed.
+      - name: Assert no service-role key in client assets
+        run: |
+          if grep -rl "sbp_" .next/static/ 2>/dev/null; then
+            echo "::error::SUPABASE_SERVICE_ROLE_KEY found in client bundle"
+            exit 1
+          fi
+          echo "ok — no service-role key in .next/static"
+
+      - name: Assert security headers are configured
+        run: |
+          node -e "
+            const m = require('./.next/routes-manifest.json');
+            const h = JSON.stringify(m.headers || '');
+            const need = ['content-security-policy','strict-transport-security',
+                          'x-content-type-options','frame-ancestors'];
+            const missing = need.filter(k => !h.toLowerCase().includes(k));
+            if (missing.length) { console.error('MISSING HEADERS:', missing); process.exit(1); }
+            console.log('ok — security headers present');
+          "
+
+  e2e-readiness:
+    name: E2E is configured (not executed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Proves the suite would still run if triggered, without touching production.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+      - run: npm ci
+      - name: List Playwright specs
+        run: npx playwright test --list
+      - name: Explain why e2e does not run here
+        run: |
+          echo "::notice::e2e/helpers.ts targets dokanstore.xyz (production) and"
+          echo "creates real users/projects/orders. It is intentionally NOT run"
+          echo "in CI to protect live merchant data. Run it manually:"
+          echo "  npm run test:e2e"
