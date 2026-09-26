@@ -11,6 +11,13 @@ import { getSiteUrl } from '@/lib/site-url';
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as { email?: string };
+    // A literal `null` body is valid JSON, so request.json() returns null and
+    // `body.email` would throw a TypeError -> a 500 on an anonymous caller.
+    // The message stays deliberately vague for every malformed shape so this
+    // endpoint cannot be used to probe which inputs are valid.
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'البريد الإلكتروني مطلوب' }, { status: 400 });
+    }
     const email = body.email?.trim().toLowerCase();
 
     if (!email) {

@@ -24,6 +24,13 @@ import { getClientIp } from '@/lib/ip';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+    // A literal `null` body is valid JSON, so request.json() returns null and
+    // the destructure below would throw a TypeError -> a 500 on an
+    // unauthenticated caller. Non-object input is a 400 like any other bad
+    // signup payload.
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'بيانات غير صالحة' }, { status: 400 });
+    }
     const { email, password, fullName } = body;
 
     if (!email || !password) {

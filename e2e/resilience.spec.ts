@@ -43,6 +43,15 @@ const JSON_CT = { 'Content-Type': 'application/json' } as const;
 /** Run-scoped so parallel/repeat runs never collide on a unique index. */
 const RUN = Date.now() % 1_000_000;
 
+/**
+ * A well-formed slug that can never exist: passes the shape gate (lowercase,
+ * hyphenated, <=100 chars) so a request reaches the lookup and comes back 404,
+ * which is what makes it useful for proving a refusal is a lookup failure and
+ * not a validation failure. Shared so R1b can also clear this store's
+ * rate-limit bucket.
+ */
+const ABSENT = `e2e-res-absent-${RUN}`;
+
 type Seeded = {
   projectId: string;
   slug: string;
@@ -104,6 +113,51 @@ async function seedStore(tag: string, tableSlug = 't1'): Promise<Seeded> {
 }
 
 /**
+ * Drop THIS store's own rate-limit buckets.
+ *
+ * /api/public/order applies two independent limiters (src/app/api/public/order/route.ts):
+ *   public-order:<slug>:<ip>     limit 20/min  — resettable by a test
+ *   public-order-ip:ip:<ip>      limit 30/min  — shared by every store on this IP
+ *
+ * The suite runs from one IP, so a spec that makes more than ~30 order calls in
+ * a minute gets 429 on its own setup requests — R5 and R8 both failed exactly
+ * that way, and it looked like an app defect. Resetting the per-slug bucket in
+ * beforeEach keeps each test's own budget clean, and the shared IP bucket is
+ * left alone on purpose: deleting it would hand every other spec a free pass and
+ * destroy the very limit the suite is there to verify. The remaining guard is
+ * to not make redundant calls, which is why the probes below reuse one response
+ * for several assertions instead of re-posting the same body.
+ */
+async function resetOwnRateLimit(slug: string): Promise<void> {
+  await admin.from('rate_limits').delete().ilike('key', `%${slug}%`);
+}
+
+/**
+ * Count every call this spec makes to a rate-limited PUBLIC endpoint, and warn
+ * loudly when a single test approaches the shared per-IP budget.
+ *
+ * The suite runs from one IP, so /api/public/order's ip bucket (30/min) and the
+ * waiter/bill buckets are a shared resource across ALL specs. R2 alone posts 10
+ * bodies and R3 about 12; running them back to back in the same minute is what
+ * made R5 and R8 fail with 429 on their own CONTROL request — a failure that
+ * reads exactly like an application defect and is not one.
+ *
+ * This is a guard rail, not a fix: it reports the budget so a future spec that
+ * adds probes is visible in the log instead of silently starving its neighbours.
+ */
+let publicOrderCalls = 0;
+const PUBLIC_ORDER_IP_BUDGET = 30;
+function countPublicOrderCall(label: string): void {
+  publicOrderCalls += 1;
+  if (publicOrderCalls > PUBLIC_ORDER_IP_BUDGET - 5) {
+    console.warn(
+      `[rate-budget] ${publicOrderCalls}/${PUBLIC_ORDER_IP_BUDGET} public-order calls from this IP` +
+        ` (last: ${label}). The next specs will 429 until the window rolls.`,
+    );
+  }
+}
+
+/**
  * Full teardown of a seeded store. Deliberately wider than
  * helpers.cleanupTestUser (which is keyed on a user): the stores here are
  * owner-less, and the rate-limit/daily-counter rows a store generates would
@@ -117,7 +171,9 @@ async function dropStore(seed: Seeded | null): Promise<void> {
   await admin.from('daily_order_counters').delete().eq('project_id', seed.projectId);
   await admin.from('rate_limits').delete().ilike('key', `%${seed.slug}%`);
   await admin.from('tables').delete().eq('project_id', seed.projectId);
-  await admin.from('product_addons').delete().eq('project_id', seed.projectId);
+  // product_addons has NO project_id column — it hangs off product_id, so this
+  // used to be a silent 400. The rows are removed anyway by the ON DELETE
+  // CASCADE from products below, which is why the leak was invisible.
   await admin.from('products').delete().eq('project_id', seed.projectId);
   await admin.from('categories').delete().eq('project_id', seed.projectId);
   await admin.from('staff_members').delete().eq('project_id', seed.projectId);
@@ -126,6 +182,7 @@ async function dropStore(seed: Seeded | null): Promise<void> {
 
 /** Every negative response carries a machine-readable `error` string. */
 async function expectErrorBody(api: APIRequestContext, path: string, init: { status: number; data?: unknown; raw?: string }): Promise<void> {
+  if (path === '/api/public/order') countPublicOrderCall(`expectErrorBody ${init.status}`);
   const res = await api.post(path, {
     headers: JSON_CT,
     ...(init.raw !== undefined ? { data: init.raw } : { data: init.data ?? {} }),
@@ -207,11 +264,84 @@ test('R1 public order: a body that is not JSON is a 400, never a 500', async ({ 
     { label: 'empty body', raw: '' },
   ];
   for (const c of cases) {
+    countPublicOrderCall(`R1 raw ${c.label}`);
     const res = await request.post('/api/public/order', { headers: JSON_CT, data: c.raw });
     expect(res.status(), `public/order [${c.label}] must be 400, not a 500`).toBe(400);
     const body = await res.json();
     expect(typeof body.error, `public/order [${c.label}] must carry \`error\``).toBe('string');
     expectNoLeak(await res.text(), `public/order [${c.label}]`);
+  }
+});
+
+/**
+ * R1b — the same class of bug across EVERY json-parsing write route.
+ *
+ * A literal `null` body is VALID JSON, so `await request.json()` returns null
+ * and the next property access throws a TypeError that the route's catch turns
+ * into a 500. Six routes shipped that way: public/order, public/waiter,
+ * public/bill, auth/signup, auth/reset-password and telegram/link — all of them
+ * reachable without a session, so an anonymous visitor could spend the error
+ * budget at will. This test is the regression guard, and it covers the whole
+ * family (null, array, string, number, bool) rather than the one shape that
+ * happened to be reported.
+ *
+ * A 401 is accepted wherever the route authenticates first, because a
+ * stateless probe reaches it without credentials; what is NOT acceptable is 5xx
+ * or a body that leaks a stack trace.
+ */
+test('R1b no json route 500s on a non-object body (null/array/string/number/bool)', async ({ request }) => {
+  const routes = [
+    '/api/public/order',
+    '/api/public/waiter',
+    '/api/public/bill',
+    '/api/auth/signup',
+    '/api/auth/reset-password',
+    '/api/telegram/link',
+    '/api/pos/order',
+    '/api/pos/cancel',
+    '/api/onboarding/project',
+    '/api/revalidate-menu',
+    '/api/push/subscribe',
+    '/api/staff/notification-prefs',
+  ];
+  const bodies: Array<[string, string]> = [
+    ['null', 'null'],
+    ['array', '[]'],
+    ['string', '"a string"'],
+    ['number', '42'],
+    ['bool', 'true'],
+  ];
+
+  for (const path of routes) {
+    for (const [label, raw] of bodies) {
+      // public/order is the only rate-limited route in this list, and the
+      // shared per-IP budget is 30/min. R1b alone would post 5 to it, on top of
+      // the ~20 R2 and R3 already spend in the same minute — so the store's own
+      // bucket is cleared first and the count is reported by the guard rail.
+      if (path === '/api/public/order') {
+        await resetOwnRateLimit(ABSENT);
+        countPublicOrderCall(`R1b ${path} ${label}`);
+      }
+      const res = await request.post(path, { headers: JSON_CT, data: raw });
+      const status = res.status();
+      expect(
+        status,
+        `${path} with a ${label} body must be a clean 4xx, got ${status}`,
+      ).toBeLessThan(500);
+      expect([400, 401, 403, 405, 422], `${path} [${label}] unexpected ${status}`).toContain(status);
+      const text = await res.text();
+      if (status === 400) {
+        // A 400 must still be the machine-readable shape, not a bare string.
+        let body: { error?: unknown };
+        try {
+          body = JSON.parse(text) as { error?: unknown };
+        } catch {
+          throw new Error(`${path} [${label}] returned 400 with a non-JSON body: ${text.slice(0, 120)}`);
+        }
+        expect(typeof body.error, `${path} [${label}] must carry an \`error\` key`).toBe('string');
+      }
+      expectNoLeak(text, `${path} [${label}]`);
+    }
   }
 });
 
@@ -315,6 +445,9 @@ test('R5 public order: unknown slugs and cross-project table slugs are 404', asy
   // A second store whose table slug genuinely DIFFERS, so "use store B's
   // table" cannot quietly resolve to store A's own row.
   const other = await seedStore('r5b', 'table-b');
+  // This test's own per-store budget, refreshed before the CONTROL order so an
+  // earlier spec's traffic cannot make this test's own success case 429.
+  await resetOwnRateLimit(seed.slug);
   const line = (projectSlug: string, tableSlug: string) => ({
     projectSlug,
     tableSlug,
@@ -412,7 +545,6 @@ test('R6 every staff-only API answers an anonymous caller with 401 and leaks not
 test('R7 public read endpoints validate their parameters (400/404, never 500)', async ({ request }) => {
   // A well-formed but non-existent store slug: passes the shape gate, so it
   // reaches the lookup and comes back as a 404.
-  const ABSENT = `e2e-res-absent-${RUN}`;
   // A slug that can never exist in the DB (DB slugs are lowercase [a-z0-9-]).
   const MALFORMED = 'Not A Slug!';
   const waiterBill = (projectSlug: string, tableSlug: string | null) => ({ projectSlug, tableSlug });

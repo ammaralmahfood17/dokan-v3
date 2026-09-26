@@ -25,6 +25,15 @@ export async function POST(request: NextRequest) {
       clientRequestId?: string;
     };
 
+    // `await request.json()` returns null for the literal body `null` — valid
+    // JSON, so nothing throws at parse time. Destructuring it then raised a
+    // TypeError that surfaced as a 500 on a caller-supplied input, i.e. an
+    // unauthenticated visitor could fill the Sentry quota with junk. Reject a
+    // non-object body here, with the same 400 as any other malformed input.
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'بيانات غير صالحة' }, { status: 400 });
+    }
+
     const { projectSlug, tableSlug, items, notes, clientRequestId } = body;
 
     if (!projectSlug || !tableSlug || !Array.isArray(items) || items.length === 0) {

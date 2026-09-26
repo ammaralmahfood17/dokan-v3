@@ -22,6 +22,11 @@ export async function POST(request: NextRequest) {
       tableSlug?: string;
     };
 
+    // A literal `null` body is valid JSON, so request.json() returns null and
+    // the next line would throw a TypeError -> a 500 on unauthenticated input.
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'بيانات غير صالحة' }, { status: 400 });
+    }
     const projectSlug = body.projectSlug?.trim();
     const tableSlug = body.tableSlug?.trim();
 

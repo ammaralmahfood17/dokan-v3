@@ -30,6 +30,11 @@ async function requireMembership(projectId: string) {
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as { projectId?: string };
+    // A literal `null` body is valid JSON, so request.json() returns null and
+    // `body.projectId` would throw a TypeError -> a 500 on caller input.
+    if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'بيانات غير صالحة' }, { status: 400 });
+    }
     if (!body.projectId) {
       return NextResponse.json({ error: 'بيانات ناقصة' }, { status: 400 });
     }
