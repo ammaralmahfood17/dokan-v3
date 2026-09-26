@@ -135,6 +135,10 @@ export async function POST(request: NextRequest) {
       items: body.items,
       notes: body.notes,
       callerUserId: user.id,
+      // No clientRequestId: POS is a staff-entered order with no retry
+      // ambiguity — a double tap is a deliberate second order, and the
+      // idempotency key is reserved for the anonymous public path where a
+      // lost response is indistinguishable from a failed one.
     });
 
     if (!result.ok) {

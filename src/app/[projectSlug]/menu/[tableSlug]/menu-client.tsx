@@ -69,6 +69,11 @@ export function MenuClient({
   // UX-6: snapshot of the last placed cart — powers «كرر الطلب» on the
   // success screen (re-fill the same lines, customer just hits send again).
   const [lastCart, setLastCart] = useState<CartLine[] | null>(null);
+  // Idempotency key for the checkout attempt in flight (migration 0014). Lives
+  // in a ref, NOT state: it must survive re-renders without ever appearing in
+  // the UI, and it must stay identical across the button retry AND the
+  // offline-queue replay. Reset to null once the order is confirmed.
+  const orderKeyRef = useRef<string | null>(null);
   const [lastAddedKey, setLastAddedKey] = useState<string | null>(null);
   const lastAddedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // بحث في المنتجات (فقط للمنيو الكبير — 12+ منتج)
@@ -276,6 +281,16 @@ export function MenuClient({
   async function placeOrder() {
     if (!cart.length) return;
     setSubmitting(true);
+    // One idempotency key per checkout attempt, minted on the FIRST attempt and
+    // reused by every retry (button press, offline queue replay, background
+    // sync). Holding it in a ref is what makes that possible: a fresh
+    // crypto.randomUUID() per call would give each retry a new key and defeat
+    // the whole point (migration 0014). It is cleared only once the order is
+    // confirmed, so the next order gets a new key.
+    if (!orderKeyRef.current) {
+      orderKeyRef.current = crypto.randomUUID();
+    }
+    const idempotencyKey = orderKeyRef.current;
     try {
       const res = await fetch('/api/public/order', {
         method: 'POST',
@@ -283,6 +298,7 @@ export function MenuClient({
         body: JSON.stringify({
           projectSlug: project.slug,
           tableSlug: table.slug,
+          clientRequestId: idempotencyKey,
           notes: orderNotes.trim() || undefined,
           items: cart.map((l) => ({
             productId: l.productId,
@@ -294,6 +310,7 @@ export function MenuClient({
       });
       const data = (await res.json()) as {
         error?: string;
+        replayed?: boolean;
         order?: { id: string; status: string; totalAmount: number; orderNumber: number };
       };
       if (!res.ok || !data.order) {
@@ -310,6 +327,10 @@ export function MenuClient({
         toast('تم تحديث سعر بعض الأصناف — المبلغ المعروض هو النهائي', { duration: 4000 });
       }
       setLastCart(cart);
+      // Order is confirmed — release the key so the NEXT checkout mints a
+      // fresh one. Until this point it must be preserved: a retry after a
+      // lost response is the whole point.
+      orderKeyRef.current = null;
       setOrderDone({
         id: data.order.id,
         totalAmount: data.order.totalAmount,
@@ -328,6 +349,11 @@ export function MenuClient({
         const payload = {
           projectSlug: project.slug,
           tableSlug: table.slug,
+          // SAME key as the attempt that just failed. The service worker
+          // replays this payload verbatim, so the server recognises it as a
+          // retry of one checkout and returns the original order if the
+          // earlier attempt actually landed.
+          clientRequestId: idempotencyKey,
           notes: orderNotes.trim() || undefined,
           items: cart.map((l) => ({
             productId: l.productId,
@@ -344,7 +370,12 @@ export function MenuClient({
           const db = dbReq.result;
           const tx = db.transaction('orders', 'readwrite');
           tx.objectStore('orders').put({
-            id: crypto.randomUUID(),
+            // Queue key = the idempotency key, NOT a fresh random uuid. A
+            // random one let the same logical checkout sit in the queue
+            // twice (once per failed attempt) and each copy would replay as a
+            // separate order. Keying by the idempotency key makes the queue
+            // hold at most one entry per checkout.
+            id: idempotencyKey,
             payload,
           });
           // Register background sync (best-effort — Safari/Firefox throw)

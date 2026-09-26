@@ -16,9 +16,16 @@ export async function POST(request: NextRequest) {
       tableSlug?: string;
       items?: PublicOrderItemInput[];
       notes?: string;
+      /**
+       * Idempotency key (migration 0014). The client mints ONE uuid per
+       * checkout attempt and reuses it for every retry — the offline queue in
+       * public/sw.js replays the exact same payload, so without this a lost
+       * response means a second real order.
+       */
+      clientRequestId?: string;
     };
 
-    const { projectSlug, tableSlug, items, notes } = body;
+    const { projectSlug, tableSlug, items, notes, clientRequestId } = body;
 
     if (!projectSlug || !tableSlug || !Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: 'بيانات غير صالحة' }, { status: 400 });
@@ -28,6 +35,19 @@ export async function POST(request: NextRequest) {
     if (projectSlug.length > 100 || tableSlug.length > 100) {
       return NextResponse.json({ error: 'بيانات غير صالحة' }, { status: 400 });
     }
+
+    // Idempotency key must be a real uuid. Accept it only in that exact shape:
+    // the value goes into a uuid column, and an unvalidated string would turn
+    // a malformed body into a 500 from the cast instead of a clean 400. A key
+    // that is present but wrong is REJECTED (not ignored) — silently dropping
+    // it would quietly re-open the duplicate-order bug.
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (clientRequestId !== undefined && clientRequestId !== null) {
+      if (typeof clientRequestId !== 'string' || !UUID_RE.test(clientRequestId)) {
+        return NextResponse.json({ error: 'بيانات غير صالحة' }, { status: 400 });
+      }
+    }
+    const idempotencyKey = typeof clientRequestId === 'string' ? clientRequestId : null;
 
     // Rate limit per (project, IP) + per IP. A slug-only budget let one
     // client 429 an entire store's ordering (2026-09-20 hardening: key
@@ -97,10 +117,28 @@ export async function POST(request: NextRequest) {
       type: 'dinein',
       items,
       notes: body.notes,
+      clientRequestId: idempotencyKey,
     });
 
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: result.status });
+    }
+
+    // A replay returns the order the customer already has. Tell them so (the
+    // success screen shows the SAME order number instead of a confusing new
+    // one) and skip every side effect below — re-firing push/Telegram would
+    // make the kitchen prepare the same plate twice, which is the exact
+    // symptom idempotency exists to remove.
+    if (result.order.replayed) {
+      return NextResponse.json({
+        replayed: true,
+        order: {
+          id: result.order.id,
+          status: result.order.status,
+          totalAmount: result.order.totalAmount,
+          orderNumber: result.order.orderNumber,
+        },
+      });
     }
 
     // Post-create side effects (audit, push, telegram) run AFTER the response

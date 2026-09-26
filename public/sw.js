@@ -276,6 +276,9 @@ async function submitPendingOrders() {
         body: JSON.stringify(order.payload),
       });
       if (res.ok) {
+        // Drop it. Note a `replayed` 200 still means "this checkout is
+        // handled" — the server returned the original order instead of making
+        // a second one, so re-sending would be pointless.
         store.delete(order.id);
       } else {
         // Permanent failure (4xx) — drop it; the customer saw the error

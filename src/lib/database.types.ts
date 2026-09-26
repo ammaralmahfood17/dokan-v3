@@ -218,6 +218,7 @@ export type Database = {
       }
       orders: {
         Row: {
+          client_request_id: string | null
           created_at: string
           id: string
           notes: string | null
@@ -230,6 +231,7 @@ export type Database = {
           type: Database["public"]["Enums"]["order_type"]
         }
         Insert: {
+          client_request_id?: string | null
           created_at?: string
           id?: string
           notes?: string | null
@@ -242,6 +244,7 @@ export type Database = {
           type?: Database["public"]["Enums"]["order_type"]
         }
         Update: {
+          client_request_id?: string | null
           created_at?: string
           id?: string
           notes?: string | null

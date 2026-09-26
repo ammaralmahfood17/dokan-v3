@@ -17,7 +17,20 @@ export type ValidatedOrderLine = {
 export type CreateOrderResult =
   | {
       ok: true;
-      order: { id: string; status: string; totalAmount: number; orderNumber: number };
+      order: {
+        id: string;
+        status: string;
+        totalAmount: number;
+        orderNumber: number;
+        /**
+         * True when the idempotency key had already been used, so the RPC
+         * returned the EXISTING order instead of creating a second one
+         * (migration 0014). The caller must skip side effects (audit, push,
+         * Telegram) in that case — the customer was already notified the first
+         * time, and a replay must not re-notify the merchant.
+         */
+        replayed: boolean;
+      };
     }
   | { ok: false; error: string; status: number };
 
@@ -40,12 +53,21 @@ export async function createSecureOrder(
     items: PublicOrderItemInput[];
     notes?: string | null;
     /** Authenticated staff id — passed to the RPCs so the DB-side
-     * membership guard can verify the caller. Omit for the anonymous
-     * public-order path (route-level validation applies there). */
+     *  membership guard can verify the caller. Omit for the anonymous
+     *  public-order path (route-level validation applies there). */
     callerUserId?: string;
+    /**
+     * Idempotency key (migration 0014). When the SAME key is seen twice for
+     * this project the RPC returns the original order instead of creating a
+     * second one, which is what makes the offline-retry path safe. Omit for
+     * internal calls (POS/waiter/bill) — NULL is excluded from the unique
+     * index, so those are never constrained.
+     */
+    clientRequestId?: string | null;
   }
 ): Promise<CreateOrderResult> {
-  const { projectId, currency, tableId, type, items, notes, callerUserId } = params;
+  const { projectId, currency, tableId, type, items, notes, callerUserId, clientRequestId } =
+    params;
   // Server-side rounding per the project's currency (BHD=3, SAR/AED/QAR=2…)
   const decimals = currencyDecimals(currency ?? 'BHD');
 
@@ -206,6 +228,7 @@ export async function createSecureOrder(
       p_notes: orderNotes.trim() || undefined,
       p_order_number: numData,
       p_caller_user_id: callerUserId,
+      p_client_request_id: clientRequestId ?? null,
       p_items: validated.map((line) => ({
         product_id: line.product_id,
         product_name: line.product_name,
@@ -227,6 +250,9 @@ export async function createSecureOrder(
     status: string;
     total_amount: number;
     order_number: number;
+    // Present since migration 0014. Default to false so a response from an
+    // older DB (migration not yet applied) can't be mistaken for a replay.
+    replayed?: boolean;
   };
 
   return {
@@ -236,6 +262,7 @@ export async function createSecureOrder(
       status: createdOrder.status,
       totalAmount: money(Number(createdOrder.total_amount), decimals),
       orderNumber: Number(createdOrder.order_number),
+      replayed: createdOrder.replayed === true,
     },
   };
 }
