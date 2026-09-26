@@ -32,7 +32,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 22, not 20: @supabase/supabase-js constructs a Realtime client
+          # at createClient() time and throws "Node.js detected but native
+          # WebSocket not found" on Node 20. This is why the first two CI runs
+          # failed in the e2e job while passing locally (local Node is 26).
+          node-version: 22
           # npm ci (not npm install) so the lockfile is authoritative — this is
           # the same fix applied to vercel.json.
           cache: 'npm'
@@ -96,7 +100,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 22 for the same reason as the verify job — supabase-js needs
+          # native WebSocket support, and helpers.ts creates the client at
+          # module scope.
+          node-version: 22
           cache: 'npm'
       - run: npm ci
 
