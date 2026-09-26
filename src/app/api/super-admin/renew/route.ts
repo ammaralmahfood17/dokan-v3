@@ -64,7 +64,12 @@ export async function POST(request: NextRequest) {
 
     // F4: purge the cached public menu so a renewed store comes back live
     // immediately instead of up to 60s later.
-    revalidateTag(`menu-${projectId}`, 'max');
+        // `expire: 0` expires the tag IMMEDIATELY, so the next request rebuilds.
+    // The previous `'max'` profile is stale-while-revalidate: the first
+    // visitor after an edit still got the OLD menu, and only the one after
+    // them saw the change. For a merchant editing a price or hiding an item
+    // that delay is a sale sold at the wrong price.
+    revalidateTag(`menu-${projectId}`, { expire: 0 });
 
     return NextResponse.json({ ok: true, subscription_expires_at: newExpiry });
   } catch (err) {

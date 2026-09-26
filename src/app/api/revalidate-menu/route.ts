@@ -40,7 +40,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'غير مصرح' }, { status: 403 });
     }
 
-    revalidateTag(`menu-${body.projectId}`, 'max');
+    
+    // `expire: 0` expires the tag IMMEDIATELY, so the next request rebuilds.
+
+    // The previous `'max'` profile is stale-while-revalidate: the first
+
+    // visitor after an edit still got the OLD menu, and only the one after
+
+    // them saw the change. For a merchant editing a price or hiding an item
+
+    // that delay is a sale sold at the wrong price.
+
+    revalidateTag(`menu-${body.projectId}`, { expire: 0 });
     return NextResponse.json({ ok: true });
   } catch (err) {
     Sentry.captureException(err);

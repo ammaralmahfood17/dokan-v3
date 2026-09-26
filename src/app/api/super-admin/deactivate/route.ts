@@ -67,7 +67,12 @@ export async function POST(request: NextRequest) {
     // F4: purge the cached public menu for this project immediately — a
     // deactivated store must stop serving its menu right away, not up to
     // 60s later (unstable_cache TTL).
-    revalidateTag(`menu-${projectId}`, 'max');
+        // `expire: 0` expires the tag IMMEDIATELY, so the next request rebuilds.
+    // The previous `'max'` profile is stale-while-revalidate: the first
+    // visitor after an edit still got the OLD menu, and only the one after
+    // them saw the change. For a merchant editing a price or hiding an item
+    // that delay is a sale sold at the wrong price.
+    revalidateTag(`menu-${projectId}`, { expire: 0 });
 
     return NextResponse.json({ ok: true });
   } catch (err) {
