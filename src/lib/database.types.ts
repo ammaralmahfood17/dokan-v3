@@ -702,6 +702,33 @@ export type Database = {
           },
         ]
       }
+            web_vitals: {
+        Row: {
+          bucket_at: string
+          created_at: string
+          id: number
+          metric: string
+          path: string
+          value_ms: number
+        }
+        Insert: {
+          bucket_at?: string
+          created_at?: string
+          id?: never
+          metric: string
+          path: string
+          value_ms: number
+        }
+        Update: {
+          bucket_at?: string
+          created_at?: string
+          id?: never
+          metric?: string
+          path?: string
+          value_ms?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

@@ -15,8 +15,16 @@ import { endImpersonation, logSuperAdminAction, MARKER_COOKIE, type StoredSessio
  * The admin's own session is restored SERVER-SIDE (setSession writes the
  * auth cookies on this response) — super admin tokens are never returned in
  * a body again. Marks the row ended and writes an audit end entry. The
- * caller's current auth cookies (the TARGET's session) are never signed out
+ * The caller's current auth cookies (the TARGET's session) are never signed out
  * here — that would log the store owner out of their own devices.
+ *
+ * NO RATE LIMIT HERE, unlike its seven sibling super-admin routes (audit
+ * 2026-09-26). Those are token-authenticated and keyed on the admin's user id;
+ * this one is bound to a single browser by the httpOnly marker cookie, so the
+ * credential IS the throttle — a caller can only ever act on the one
+ * impersonation their own browser started, and the id is dead once used. An IP
+ * or per-user budget would add a failure mode (a legitimate admin whose retry
+ * storm 429s and cannot restore their session) without closing any exposure.
  */
 export async function POST(request: NextRequest) {
   try {

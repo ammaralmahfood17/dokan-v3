@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
+import { limitSuperAdmin } from '@/lib/super-admin-rate-limit';
 import { createClient } from '@/lib/supabase/server';
 import { startImpersonation, logSuperAdminAction, MARKER_COOKIE } from '@/lib/super-admin';
 import type { Json } from '@/lib/database.types';
@@ -23,6 +24,15 @@ export async function POST(request: NextRequest) {
 
     const { data: isAdmin } = await userClient.rpc('is_super_admin');
     if (!isAdmin) return NextResponse.json({ error: 'غير مصرح' }, { status: 403 });
+
+    // Defence in depth: this route is gated by is_super_admin() and the
+    // underlying RPC is service_role-only, so the limit is not closing a live
+    // bypass — it stops a stolen admin session from hammering the endpoint
+    // (each call costs a getUser() + an is_super_admin() RPC before the work
+    // is even rejected). Keyed on the admin's user id, not their IP, so a shared
+    // office connection can't lock out a real admin.
+    const throttled = await limitSuperAdmin(request, user.id, 'impersonate');
+    if (throttled) return throttled;
 
     const body = (await request.json()) as { targetUserId?: string; projectId?: string };
     if (!body.targetUserId || typeof body.targetUserId !== 'string') {

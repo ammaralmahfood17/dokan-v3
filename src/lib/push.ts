@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/nextjs';
 import { createAdminClient } from './supabase/admin';
 import { getSiteUrl } from './site-url';
 
@@ -90,7 +91,21 @@ export async function sendPushToProject(
         body?: string;
         message?: string;
       };
-      // AR-7: سطر الفشل فقط في الإنتاج (بدون ضجيج لكل إرسال ناجح/ملخص)
+      // The push FAILED — a failed delivery means a merchant never heard their
+      // new order, which is a business-critical event. It must be visible in
+      // production: report to Sentry (which is registered — see
+      // src/instrumentation-client.ts and sentry.server.config.ts). The old
+      // `NODE_ENV !== 'production'` guard made every real delivery failure
+      // completely invisible, so a broken VAPID key or an expired endpoint
+      // looked identical to success from the outside.
+      Sentry.captureMessage(
+        `[Push] delivery failed: ${reason?.statusCode ?? 'no status'} ${
+          reason?.body || reason?.message || 'unknown'
+        }`,
+        { level: reason?.statusCode === 410 || reason?.statusCode === 404 ? 'info' : 'warning' }
+      );
+      // Keep the per-subscription line for local debugging only — in
+      // production it is pure noise on top of the Sentry event.
       if (process.env.NODE_ENV !== 'production') {
         console.log('[Push] sub', i, 'FAILED —', reason?.statusCode, reason?.body || reason?.message);
       }
@@ -102,6 +117,22 @@ export async function sendPushToProject(
 
   if (process.env.NODE_ENV !== 'production') {
     console.log('[Push] result — sent:', sent, 'failed:', failed, 'cleaned:', expiredEndpoints.length);
+  }
+
+  // A run where EVERY notification failed means the merchant heard nothing at
+  // all — that is an outage, not per-subscription noise, and it is invisible
+  // without this. The per-submission failures above are already reported, so
+  // this fires only for the total-loss case.
+  if (subs.length > 0 && sent === 0) {
+    Sentry.captureMessage(
+      `[Push] ALL ${failed} notification deliveries failed for project ${projectId} — merchant received nothing`,
+      'error'
+    );
+  } else if (failed > 0) {
+    Sentry.captureMessage(
+      `[Push] ${failed}/${subs.length} deliveries failed for project ${projectId}`,
+      'warning'
+    );
   }
 
   // Clean up expired subscriptions
